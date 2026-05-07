@@ -1,4 +1,7 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
+import { createResolver, defineNuxtModule } from "@nuxt/kit";
+
+const resolver = createResolver(import.meta.url);
+
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
@@ -10,9 +13,10 @@ export default defineNuxtConfig({
     "@nuxt/icon",
     "@nuxt/image",
     "@compodium/nuxt",
-    "@hebilicious/form-actions-nuxt",
     "@nuxtjs/color-mode",
     "@nuxtjs/tailwindcss",
+    "@regle/nuxt",
+    "@pinia/nuxt",
   ],
   vite: {
     optimizeDeps: {

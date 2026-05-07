@@ -1,17 +1,20 @@
 {
   "name": "kyoku-hub",
-  "type": "module",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check"
   },
   "dependencies": {
     "@compodium/nuxt": "0.1.0-beta.12",
-    "@hebilicious/form-actions-nuxt": "^0.3.0",
     "@nuxt/eslint": "1.15.2",
     "@nuxt/fonts": "0.14.0",
     "@nuxt/hints": "1.1.1",
@@ -20,9 +23,19 @@
     "@nuxt/kit": ">=3.15",
     "@nuxtjs/color-mode": "4.0.0",
     "@nuxtjs/tailwindcss": "6.14.0",
+    "@pinia/nuxt": "0.11.3",
+    "@regle/core": "^1.24.3",
+    "@regle/nuxt": "1.24.3",
+    "@regle/rules": "^1.24.3",
     "eslint": "^9.0.0 || ^10.0.0",
+    "musicbrainz-api": "^1.2.1",
     "nuxt": "^4.4.4",
+    "pinia": "^3.0.4",
     "vue": "^3.5.33",
     "vue-router": "^5.0.6"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.48.0",
+    "oxlint": "^1.63.0"
   }
 }
