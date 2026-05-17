@@ -16,7 +16,7 @@ const collapsed = ref(false);
 
     <!-- Navigation -->
     <nav class="relative z-10 border-b border-white/5">
-      <div class="max-w-7xl mx-auto px-1 py-4 flex items-center justify-between">
+      <div class="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between">
         <NuxtLink to="/" class="text-xl font-bold">
           <span class="text-white">kyoku</span>
           <span class="text-orange-400">.</span>
@@ -31,7 +31,7 @@ const collapsed = ref(false);
     </nav>
 
     <!-- Content -->
-    <main class="relative z-10 max-w-7xl mx-auto px-1 py-8">
+    <main class="relative z-10 max-w-[1400px] mx-auto px-6 py-8">
       <slot />
     </main>
 
