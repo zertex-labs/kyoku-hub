@@ -1,7 +1,3 @@
-import { createResolver, defineNuxtModule } from "@nuxt/kit";
-
-const resolver = createResolver(import.meta.url);
-
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
@@ -18,9 +14,16 @@ export default defineNuxtConfig({
     "@regle/nuxt",
     "@pinia/nuxt",
   ],
+  tailwindcss: {
+    configPath: "tailwind.config.ts",
+    cssPath: "~/assets/css/main.css",
+  },
   vite: {
     optimizeDeps: {
       include: ["@vue/devtools-core", "@vue/devtools-kit"],
     },
+  },
+  image: {
+    domains: ["archive.org"],
   },
 });
