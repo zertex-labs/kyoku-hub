@@ -2,21 +2,6 @@
 const mBAristSearchStore = useMBAristSearchStore();
 const { r$, loadedArtists } = storeToRefs(mBAristSearchStore);
 
-type ArtistActivity = {
-  name: string;
-  image: string;
-  type: "release" | "update" | "delete";
-  content: string;
-  ts: string;
-};
-
-type IncompleteArtist = {
-  name: string;
-  image: string;
-  have: number;
-  total: number;
-};
-
 const activities = ref<ArtistActivity[]>([
   {
     name: "Ado",
@@ -94,9 +79,7 @@ const incompleteArtists = ref<IncompleteArtist[]>([
   <div class="flex flex-col-reverse lg:flex-row gap-6">
     <!-- Activity Feed -->
     <div class="flex-1 min-w-0">
-      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
-        Activity
-      </h2>
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Activity</h2>
       <div class="flex flex-col gap-3">
         <ArtistActivity v-for="activity in activities" :key="activity.content" :activity />
       </div>

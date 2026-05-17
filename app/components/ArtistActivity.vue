@@ -1,12 +1,4 @@
 <script setup lang="ts">
-type ArtistActivity = {
-  name: string;
-  image: string;
-  type: "release" | "update" | "delete";
-  content: string;
-  ts: string;
-};
-
 const $props = defineProps<{ activity: ArtistActivity }>();
 
 const typeStyle = computed(() => {
