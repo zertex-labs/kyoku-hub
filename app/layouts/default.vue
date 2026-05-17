@@ -1,5 +1,24 @@
 <script setup lang="ts">
 const collapsed = ref(false);
+const authStore = useAuthStore();
+const userMenuOpen = ref(false);
+
+function toggleUserMenu() {
+  userMenuOpen.value = !userMenuOpen.value;
+}
+
+function closeUserMenu() {
+  userMenuOpen.value = false;
+}
+
+onMounted(() => {
+  document.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    if (!target.closest("[data-user-menu]")) {
+      userMenuOpen.value = false;
+    }
+  });
+});
 </script>
 
 <template>
@@ -15,23 +34,63 @@ const collapsed = ref(false);
     </div>
 
     <!-- Navigation -->
-    <nav class="relative z-10 border-b border-white/5">
-      <div class="max-w-[1400px] mx-auto px-6 py-4 flex items-center justify-between">
+    <nav class="relative z-20 border-b border-white/5">
+      <div class="max-w-[1400px] mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
         <NuxtLink to="/" class="text-xl font-bold">
           <span class="text-white">kyoku</span>
           <span class="text-orange-400">.</span>
         </NuxtLink>
-        <div class="flex gap-6 text-sm *:text-gray-400 [&>*:hover]:text-white *:transition-colors">
+        <div class="flex gap-4 sm:gap-6 text-sm *:text-gray-400 [&>*:hover]:text-white *:transition-colors">
           <NuxtLink to="/search" active-class="text-white">Search</NuxtLink>
           <NuxtLink to="/transfers" active-class="text-white">Transfers</NuxtLink>
           <NuxtLink to="/chat" active-class="text-white">Chat</NuxtLink>
-          <NuxtLink to="/settings" active-class="text-white">Settings</NuxtLink>
+        </div>
+        <div class="relative" data-user-menu>
+          <button
+            v-if="authStore.user"
+            @click="toggleUserMenu"
+            class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+          >
+            {{ authStore.user.username }}
+            <Icon name="lucide:chevron-down" class="w-4 h-4 transition-transform" :class="{ 'rotate-180': userMenuOpen }" />
+          </button>
+
+          <!-- Dropdown -->
+          <Transition
+            enter-active-class="transition duration-100 ease-out"
+            enter-from-class="opacity-0 scale-95"
+            enter-to-class="opacity-100 scale-100"
+            leave-active-class="transition duration-75 ease-in"
+            leave-from-class="opacity-100 scale-100"
+            leave-to-class="opacity-0 scale-95"
+          >
+            <div
+              v-if="userMenuOpen"
+              class="absolute right-0 mt-2 w-40 bg-[#1a1a1f] border border-white/10 rounded-lg shadow-xl overflow-hidden"
+            >
+              <NuxtLink
+                to="/settings"
+                @click="closeUserMenu"
+                class="flex items-center gap-2 px-3 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+              >
+                <Icon name="lucide:settings" class="w-4 h-4" />
+                Settings
+              </NuxtLink>
+              <button
+                @click="authStore.logout()"
+                class="flex items-center gap-2 w-full px-3 py-2.5 text-sm text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors"
+              >
+                <Icon name="lucide:log-out" class="w-4 h-4" />
+                Logout
+              </button>
+            </div>
+          </Transition>
         </div>
       </div>
     </nav>
 
     <!-- Content -->
-    <main class="relative z-10 max-w-[1400px] mx-auto px-6 py-8">
+    <main class="relative z-10 max-w-[1400px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
       <slot />
     </main>
 

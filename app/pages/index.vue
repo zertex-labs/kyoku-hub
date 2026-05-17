@@ -91,7 +91,7 @@ const incompleteArtists = ref<IncompleteArtist[]>([
 </script>
 
 <template>
-  <div class="flex gap-6">
+  <div class="flex flex-col-reverse lg:flex-row gap-6">
     <!-- Activity Feed -->
     <div class="flex-1 min-w-0">
       <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
@@ -102,12 +102,12 @@ const incompleteArtists = ref<IncompleteArtist[]>([
       </div>
     </div>
 
-    <!-- Incomplete Artists (wider grid, fills remaining space) -->
-    <aside class="w-[45%] shrink-0">
+    <!-- Incomplete Artists -->
+    <aside class="w-full lg:w-[45%] shrink-0">
       <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">
         Incomplete Artists
       </h2>
-      <div class="grid grid-cols-5 gap-2">
+      <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
         <NuxtLink
           v-for="artist in incompleteArtists"
           :key="artist.name"

@@ -2,6 +2,15 @@ export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
 
+  runtimeConfig: {
+    musicbrainzClientId: "",
+    musicbrainzClientSecret: "",
+    public: {
+      baseUrl: "http://localhost:3000",
+      authMode: "oauth",
+    },
+  },
+
   modules: [
     "@nuxt/eslint",
     "@nuxt/fonts",
