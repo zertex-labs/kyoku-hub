@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `token_expires_at` integer;

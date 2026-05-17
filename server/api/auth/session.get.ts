@@ -5,8 +5,9 @@ export default defineEventHandler((event) => {
     return { authenticated: false, user: null };
   }
 
-  const session = getAppSession(sessionId);
+  const session = getSessionWithUser(sessionId);
   if (!session) {
+    deleteCookie(event, "kyoku_session");
     return { authenticated: false, user: null };
   }
 

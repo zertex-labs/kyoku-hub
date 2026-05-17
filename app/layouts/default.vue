@@ -1,5 +1,4 @@
 <script setup lang="ts">
-const collapsed = ref(false);
 const authStore = useAuthStore();
 const userMenuOpen = ref(false);
 
@@ -40,10 +39,12 @@ onMounted(() => {
           <span class="text-white">kyoku</span>
           <span class="text-orange-400">.</span>
         </NuxtLink>
-        <div class="flex gap-4 sm:gap-6 text-sm *:text-gray-400 [&>*:hover]:text-white *:transition-colors">
-          <NuxtLink to="/search" active-class="text-white">Search</NuxtLink>
-          <NuxtLink to="/transfers" active-class="text-white">Transfers</NuxtLink>
-          <NuxtLink to="/chat" active-class="text-white">Chat</NuxtLink>
+        <div
+          class="flex gap-4 sm:gap-6 text-sm *:text-gray-400 [&>*:hover]:text-white *:transition-colors"
+        >
+          <NuxtLink to="/search">Search</NuxtLink>
+          <NuxtLink to="/artists">Artists</NuxtLink>
+          <NuxtLink to="/chat">Chat</NuxtLink>
         </div>
         <div class="relative" data-user-menu>
           <button
@@ -52,7 +53,11 @@ onMounted(() => {
             class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
           >
             {{ authStore.user.username }}
-            <Icon name="lucide:chevron-down" class="w-4 h-4 transition-transform" :class="{ 'rotate-180': userMenuOpen }" />
+            <Icon
+              name="lucide:chevron-down"
+              class="w-4 h-4 transition-transform"
+              :class="{ 'rotate-180': userMenuOpen }"
+            />
           </button>
 
           <!-- Dropdown -->

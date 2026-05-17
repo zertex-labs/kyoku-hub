@@ -12,15 +12,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const username = body.username.trim();
-  const sessionId = generateSessionId();
-  setAppSession(sessionId, { username });
+  const userId = findOrCreateUser(username);
+  const sessionId = await createSession(userId);
 
-  setCookie(event, "kyoku_session", sessionId, {
-    httpOnly: true,
-    maxAge: 60 * 60 * 24 * 30,
-    sameSite: "lax",
-    path: "/",
-  });
+  setCookie(event, "kyoku_session", sessionId, SESSION_COOKIE_OPTIONS);
 
   return { ok: true, user: { username } };
 });

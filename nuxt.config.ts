@@ -5,6 +5,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     musicbrainzClientId: "",
     musicbrainzClientSecret: "",
+    tokenEncryptionKey: "", // 32-byte hex key for AES-256-GCM
     public: {
       baseUrl: "http://localhost:3000",
       authMode: "oauth",
@@ -33,7 +34,13 @@ export default defineNuxtConfig({
   },
   vite: {
     optimizeDeps: {
-      include: ["@vue/devtools-core", "@vue/devtools-kit"],
+      include: [
+        "musicbrainz-api",
+        "@regle/rules",
+        "@regle/core",
+        "@vue/devtools-core",
+        "@vue/devtools-kit",
+      ],
     },
   },
   image: {

@@ -10,6 +10,8 @@ export const useMBAristSearchStore = defineStore("mb-artist-search", () => {
   const { $mbApi } = useNuxtApp();
 
   const loadedArtists = shallowRef<IArtistMatch[]>([]);
+  const hasMore = ref(false);
+  const totalResults = ref(0);
 
   const { r$ } = useRegle(
     { artistName: "" },
@@ -31,11 +33,20 @@ export const useMBAristSearchStore = defineStore("mb-artist-search", () => {
     });
 
     loadedArtists.value = [...loadedArtists.value, ...res.artists];
+    totalResults.value = res.count;
+    hasMore.value = loadedArtists.value.length < res.count;
+  }
+
+  function loadMore() {
+    return doSearch(loadedArtists.value.length);
   }
 
   return {
     r$,
     doSearch,
+    loadMore,
     loadedArtists,
+    hasMore,
+    totalResults,
   };
 });

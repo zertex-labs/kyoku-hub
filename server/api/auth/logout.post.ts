@@ -2,7 +2,7 @@
 export default defineEventHandler((event) => {
   const sessionId = getSessionIdFromEvent(event);
   if (sessionId) {
-    deleteAppSession(sessionId);
+    deleteSession(sessionId);
     deleteCookie(event, "kyoku_session");
   }
   return { ok: true };

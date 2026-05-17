@@ -11,7 +11,12 @@ export default defineEventHandler(async (event) => {
   if (!storedState || storedState !== query.state) {
     throw createError({ statusCode: 400, statusMessage: "Invalid OAuth state" });
   }
+  const codeVerifier = getCookie(event, "kyoku_oauth_verifier");
+  if (!codeVerifier) {
+    throw createError({ statusCode: 400, statusMessage: "Missing PKCE verifier" });
+  }
   deleteCookie(event, "kyoku_oauth_state");
+  deleteCookie(event, "kyoku_oauth_verifier");
 
   if (query.error) {
     throw createError({ statusCode: 400, statusMessage: `OAuth error: ${query.error}` });
@@ -40,6 +45,7 @@ export default defineEventHandler(async (event) => {
         client_id: config.musicbrainzClientId,
         client_secret: config.musicbrainzClientSecret,
         redirect_uri: redirectUri,
+        code_verifier: codeVerifier,
       }).toString(),
     });
   } catch {
@@ -55,19 +61,14 @@ export default defineEventHandler(async (event) => {
     return sendRedirect(event, "/login?error=userinfo_failed");
   }
 
-  const sessionId = generateSessionId();
-  setAppSession(sessionId, {
-    username: userInfo.sub,
-    accessToken: tokenRes.access_token,
-    refreshToken: tokenRes.refresh_token,
-  });
+  // Find or create user, update tokens
+  const userId = findOrCreateUser(userInfo.sub);
+  updateUserTokens(userId, tokenRes.access_token, tokenRes.refresh_token, tokenRes.expires_in);
 
-  setCookie(event, "kyoku_session", sessionId, {
-    httpOnly: true,
-    maxAge: 60 * 60 * 24 * 30,
-    sameSite: "lax",
-    path: "/",
-  });
+  // Create session
+  const sessionId = await createSession(userId);
+
+  setCookie(event, "kyoku_session", sessionId, SESSION_COOKIE_OPTIONS);
 
   return sendRedirect(event, "/");
 });

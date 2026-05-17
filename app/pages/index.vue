@@ -1,87 +1,35 @@
 <script setup lang="ts">
-const mBAristSearchStore = useMBAristSearchStore();
-const { r$, loadedArtists } = storeToRefs(mBAristSearchStore);
-
-const activities = ref<ArtistActivity[]>([
-  {
-    name: "Ado",
-    image:
-      "https://archive.org/download/mbid-e270332c-c637-45ec-bc9e-a670377c101a/mbid-e270332c-c637-45ec-bc9e-a670377c101a-39285887433_thumb250.jpg",
-    type: "release",
-    ts: "3 hours ago",
-    content: "Released new Album Zanmu",
-  },
-  {
-    name: "Ado",
-    image:
-      "https://archive.org/download/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504-38111318058_thumb250.jpg",
-    type: "update",
-    ts: "5 hours ago",
-    content: "Updated Single VALUE metadata",
-  },
-  {
-    name: "YOASOBI",
-    image:
-      "https://archive.org/download/mbid-e270332c-c637-45ec-bc9e-a670377c101a/mbid-e270332c-c637-45ec-bc9e-a670377c101a-39285887433_thumb250.jpg",
-    type: "delete",
-    ts: "1 day ago",
-    content: "Removed duplicate Single Idol",
-  },
-]);
-
-const incompleteArtists = ref<IncompleteArtist[]>([
-  {
-    name: "Ado",
-    image:
-      "https://archive.org/download/mbid-e270332c-c637-45ec-bc9e-a670377c101a/mbid-e270332c-c637-45ec-bc9e-a670377c101a-39285887433_thumb250.jpg",
-    have: 10,
-    total: 25,
-  },
-  {
-    name: "YOASOBI",
-    image:
-      "https://archive.org/download/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504-38111318058_thumb250.jpg",
-    have: 5,
-    total: 12,
-  },
-  {
-    name: "Kenshi Yonezu",
-    image:
-      "https://archive.org/download/mbid-e270332c-c637-45ec-bc9e-a670377c101a/mbid-e270332c-c637-45ec-bc9e-a670377c101a-39285887433_thumb250.jpg",
-    have: 18,
-    total: 34,
-  },
-  {
-    name: "LiSA",
-    image:
-      "https://archive.org/download/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504-38111318058_thumb250.jpg",
-    have: 7,
-    total: 20,
-  },
-  {
-    name: "Eve",
-    image:
-      "https://archive.org/download/mbid-e270332c-c637-45ec-bc9e-a670377c101a/mbid-e270332c-c637-45ec-bc9e-a670377c101a-39285887433_thumb250.jpg",
-    have: 3,
-    total: 15,
-  },
-  {
-    name: "Aimer",
-    image:
-      "https://archive.org/download/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504/mbid-aaef585f-a419-4b54-9e33-0c12e72ae504-38111318058_thumb250.jpg",
-    have: 22,
-    total: 40,
-  },
-]);
+const activities = ref<ArtistActivity[]>([]);
+const incompleteArtists = ref<IncompleteArtist[]>([]);
 </script>
 
 <template>
-  <div class="flex flex-col-reverse lg:flex-row gap-6">
+  <div
+    class="flex flex-col w-full justify-center items-center min-h-[60vh] gap-4"
+    v-if="activities.length == 0 && incompleteArtists.length == 0"
+  >
+    <Icon name="lucide:music" class="w-12 h-12 text-gray-600" />
+    <h2 class="text-xl font-semibold text-gray-300">Looks like it's your first time here</h2>
+    <p class="text-gray-500 text-sm">Start by adding artists you want to track.</p>
+    <NuxtLink
+      to="/artists"
+      class="mt-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-medium rounded-lg transition-colors"
+    >
+      Add your first artists
+    </NuxtLink>
+  </div>
+  <div v-else class="flex flex-col-reverse lg:flex-row gap-6">
     <!-- Activity Feed -->
     <div class="flex-1 min-w-0">
       <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Activity</h2>
       <div class="flex flex-col gap-3">
-        <ArtistActivity v-for="activity in activities" :key="activity.content" :activity />
+        <ArtistActivity
+          v-if="activities.length > 0"
+          v-for="activity in activities"
+          :key="activity.content"
+          :activity
+        />
+        <span v-else class="text-gray-400 text-sm">Nothing to show</span>
       </div>
     </div>
 
@@ -92,6 +40,7 @@ const incompleteArtists = ref<IncompleteArtist[]>([
       </h2>
       <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2">
         <NuxtLink
+          v-if="incompleteArtists.length > 0"
           v-for="artist in incompleteArtists"
           :key="artist.name"
           class="group relative rounded-lg overflow-hidden aspect-[3/4] cursor-pointer"
@@ -111,6 +60,7 @@ const incompleteArtists = ref<IncompleteArtist[]>([
             </p>
           </div>
         </NuxtLink>
+        <span v-else class="text-gray-400 text-sm">Nothing to show</span>
       </div>
     </aside>
   </div>
