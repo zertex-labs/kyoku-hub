@@ -34,13 +34,16 @@
     "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.45.2",
     "eslint": "^9.0.0 || ^10.0.0",
+    "h3-zod": "^0.5.3",
     "musicbrainz-api": "^1.2.1",
     "nuxt": "^4.4.4",
     "pinia": "^3.0.4",
     "vue": "^3.5.33",
-    "vue-router": "^5.0.6"
+    "vue-router": "^5.0.6",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "^1.2.108",
     "@types/better-sqlite3": "^7.6.13",
     "drizzle-kit": "^0.31.10",
     "oxfmt": "^0.48.0",

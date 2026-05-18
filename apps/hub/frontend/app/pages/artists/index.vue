@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { IArtistMatch } from "musicbrainz-api";
+
 const searchStore = useMBAristSearchStore();
 const { r$, loadedArtists, hasMore } = storeToRefs(searchStore);
 
@@ -6,35 +8,53 @@ const showAddModal = ref(false);
 const searchQuery = ref("");
 const searching = ref(false);
 const loadingMore = ref(false);
+const adding = ref(false);
 
-// Placeholder: tracked artists (will be replaced with real data later)
-const trackedArtists = ref<IncompleteArtist[]>([]);
+// Fetch tracked artists reactively
+const { data: trackedArtists, refresh: refreshArtists } = await useFetch("/api/artist/list");
 
 async function handleSearch() {
   if (!searchQuery.value.trim()) return;
   searching.value = true;
-  r$.value.artistName.$value = searchQuery.value.trim();
-  await searchStore.doSearch();
-  searching.value = false;
+  try {
+    r$.value.artistName.$value = searchQuery.value.trim();
+    await searchStore.doSearch();
+  } catch (e) {
+    console.error("Search failed:", e);
+  } finally {
+    searching.value = false;
+  }
 }
 
 async function handleLoadMore() {
   loadingMore.value = true;
-  await searchStore.loadMore();
-  loadingMore.value = false;
+  try {
+    await searchStore.loadMore();
+  } catch (e) {
+    console.error("Load more failed:", e);
+  } finally {
+    loadingMore.value = false;
+  }
 }
 
-function addArtist(artist: { name: string; disambiguation?: string }) {
-  // TODO: persist to backend
-  trackedArtists.value.push({
-    name: artist.name,
-    image: "",
-    have: 0,
-    total: 0,
-  });
-  showAddModal.value = false;
-  searchQuery.value = "";
-  loadedArtists.value = [];
+async function addArtist(artist: IArtistMatch) {
+  if (adding.value) return;
+  adding.value = true;
+  try {
+    await $fetch("/api/artist/add", {
+      method: "POST",
+      body: { musicbrainzId: artist.id },
+    });
+    await refreshArtists();
+    showAddModal.value = false;
+    searchQuery.value = "";
+    loadedArtists.value = [];
+  } catch (e: any) {
+    // TODO: show error toast
+    console.error("Failed to add artist:", e.data?.statusMessage || e.message);
+  } finally {
+    adding.value = false;
+  }
 }
 
 function openModal() {
@@ -65,17 +85,17 @@ function closeModal() {
 
     <!-- Artists grid -->
     <div
-      v-if="trackedArtists.length > 0"
+      v-if="trackedArtists?.length"
       class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3"
     >
       <NuxtLink
         v-for="artist in trackedArtists"
-        :key="artist.name"
+        :key="artist.id"
         class="group relative rounded-lg overflow-hidden aspect-[3/4] cursor-pointer bg-white/5"
       >
         <NuxtImg
-          v-if="artist.image"
-          :src="artist.image"
+          v-if="artist.imageUrl"
+          :src="artist.imageUrl"
           :alt="artist.name"
           class="w-full h-full object-cover transition-transform group-hover:scale-105"
         />
@@ -85,7 +105,7 @@ function closeModal() {
         <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
         <div class="absolute bottom-0 left-0 right-0 p-2">
           <p class="text-xs font-medium text-white truncate">{{ artist.name }}</p>
-          <p class="text-[11px] text-orange-400 font-bold">{{ artist.have }}/{{ artist.total }}</p>
+          <p v-if="artist.disambiguation" class="text-[11px] text-gray-500 truncate">{{ artist.disambiguation }}</p>
         </div>
       </NuxtLink>
     </div>

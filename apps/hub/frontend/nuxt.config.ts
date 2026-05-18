@@ -35,7 +35,6 @@ export default defineNuxtConfig({
   vite: {
     optimizeDeps: {
       include: [
-        "musicbrainz-api",
         "@regle/rules",
         "@regle/core",
         "@vue/devtools-core",

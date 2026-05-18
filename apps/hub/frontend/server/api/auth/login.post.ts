@@ -1,3 +1,10 @@
+import { z } from "zod";
+import { useValidatedBody } from "h3-zod";
+
+const loginSchema = z.object({
+  username: z.string().trim().min(1, "Username is required"),
+});
+
 // POST /api/auth/login - Username-only login (when auth mode is "none")
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig();
@@ -6,12 +13,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: "Username login is disabled when OAuth is enabled" });
   }
 
-  const body = await readBody<{ username: string }>(event);
-  if (!body?.username || body.username.trim().length === 0) {
-    throw createError({ statusCode: 400, statusMessage: "Username is required" });
-  }
-
-  const username = body.username.trim();
+  const { username } = await useValidatedBody(event, loginSchema);
   const userId = findOrCreateUser(username);
   const sessionId = await createSession(userId);
 
