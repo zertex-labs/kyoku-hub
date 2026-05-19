@@ -1,4 +1,7 @@
 export const useAuthStore = defineStore("auth", () => {
+  const config = useRuntimeConfig();
+  const apiBase = config.public.apiBaseUrl as string;
+
   const user = ref<{ username: string } | null>(null);
   const authenticated = ref(false);
   const loading = ref(true);
@@ -6,9 +9,9 @@ export const useAuthStore = defineStore("auth", () => {
   async function fetchSession() {
     loading.value = true;
     try {
-      const fetch = useRequestFetch();
-      const data = await fetch<{ authenticated: boolean; user: { username: string } | null }>(
-        "/api/auth/session",
+      const data = await $fetch<{ authenticated: boolean; user: { username: string } | null }>(
+        `${apiBase}/api/auth/session`,
+        { credentials: "include" },
       );
       authenticated.value = data.authenticated;
       user.value = data.user;
@@ -21,21 +24,11 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function logout() {
-    await $fetch("/api/auth/logout", { method: "POST" });
+    await $fetch(`${apiBase}/api/auth/logout`, { method: "POST", credentials: "include" });
     authenticated.value = false;
     user.value = null;
     navigateTo("/login");
   }
 
-  async function loginWithUsername(username: string) {
-    const data = await $fetch<{ ok: boolean; user: { username: string } }>(
-      "/api/auth/login",
-      { method: "POST", body: { username } },
-    );
-    authenticated.value = true;
-    user.value = data.user;
-    navigateTo("/");
-  }
-
-  return { user, authenticated, loading, fetchSession, logout, loginWithUsername };
+  return { user, authenticated, loading, fetchSession, logout };
 });

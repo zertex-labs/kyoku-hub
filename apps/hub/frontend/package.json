@@ -3,19 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nuxt build",
+    "build": "nuxt generate",
     "dev": "nuxt dev",
-    "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "fmt:check": "oxfmt --check"
   },
   "dependencies": {
     "@compodium/nuxt": "0.1.0-beta.12",
@@ -24,29 +19,22 @@
     "@nuxt/hints": "1.1.1",
     "@nuxt/icon": "2.2.2",
     "@nuxt/image": "2.0.0",
-    "@nuxt/kit": ">=3.15",
+    "@nuxt/kit": ">=4.4.6",
     "@nuxtjs/color-mode": "4.0.0",
     "@nuxtjs/tailwindcss": "6.14.0",
     "@pinia/nuxt": "0.11.3",
-    "@regle/core": "^1.24.3",
+    "@regle/core": "^1.25.2",
     "@regle/nuxt": "1.24.3",
-    "@regle/rules": "^1.24.3",
-    "better-sqlite3": "^12.10.0",
-    "drizzle-orm": "^0.45.2",
-    "eslint": "^9.0.0 || ^10.0.0",
-    "h3-zod": "^0.5.3",
-    "musicbrainz-api": "^1.2.1",
-    "nuxt": "^4.4.4",
+    "@regle/rules": "^1.25.2",
+    "eslint": "^10.4.0",
+    "nuxt": "^4.4.6",
     "pinia": "^3.0.4",
-    "vue": "^3.5.33",
-    "vue-router": "^5.0.6",
-    "zod": "^4.4.3"
+    "vue": "^3.5.34",
+    "vue-router": "^5.0.7"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.108",
-    "@types/better-sqlite3": "^7.6.13",
-    "drizzle-kit": "^0.31.10",
     "oxfmt": "^0.48.0",
-    "oxlint": "^1.63.0"
+    "oxlint": "^1.66.0"
   }
 }
