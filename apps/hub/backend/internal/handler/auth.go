@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/labstack/echo/v4"
-	"github.com/kyoku/hub-backend/internal/config"
-	"github.com/kyoku/hub-backend/internal/database"
 )
 
 const (
@@ -28,10 +28,10 @@ const (
 
 type AuthHandler struct {
 	cfg     *config.Config
-	queries *database.Queries
+	queries *queries.Queries
 }
 
-func NewAuthHandler(cfg *config.Config, queries *database.Queries) *AuthHandler {
+func NewAuthHandler(cfg *config.Config, queries *queries.Queries) *AuthHandler {
 	return &AuthHandler{cfg: cfg, queries: queries}
 }
 

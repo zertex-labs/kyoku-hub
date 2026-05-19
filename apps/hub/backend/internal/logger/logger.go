@@ -15,6 +15,7 @@ func New() *zap.Logger {
 	} else {
 		cfg = zap.NewDevelopmentConfig()
 		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		cfg.DisableStacktrace = true
 	}
 
 	logger, _ := cfg.Build()

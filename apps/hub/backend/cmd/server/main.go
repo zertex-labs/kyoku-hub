@@ -9,11 +9,14 @@ import (
 	echomw "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/zap"
 
-	"github.com/kyoku/hub-backend/internal/config"
-	"github.com/kyoku/hub-backend/internal/database"
-	"github.com/kyoku/hub-backend/internal/handler"
-	"github.com/kyoku/hub-backend/internal/logger"
-	mw "github.com/kyoku/hub-backend/internal/middleware"
+	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
+
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/logger"
+	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 )
 
 func main() {
@@ -39,7 +42,8 @@ func main() {
 		log.Fatal("migration failed", zap.Error(err))
 	}
 
-	queries := database.NewQueries(pool)
+	q := queries.New(pool)
+	mb := musicbrainz.NewClient("Kyoku/0.1.0 (https://github.com/zertex-labs/kyoku-hub)")
 
 	e := echo.New()
 	e.HideBanner = true
@@ -58,8 +62,11 @@ func main() {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	authHandler := handler.NewAuthHandler(cfg, queries)
+	authHandler := handler.NewAuthHandler(cfg, q)
 	authHandler.Register(e.Group("/api/auth"))
+
+	artistHandler := handler.NewArtistHandler(cfg, q, mb)
+	artistHandler.Register(e.Group("/api/artist"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
 	if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {
