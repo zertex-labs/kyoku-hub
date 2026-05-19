@@ -12,7 +12,10 @@ const loadingMore = ref(false);
 const adding = ref(false);
 
 // Fetch tracked artists reactively
-const { data: trackedArtists, refresh: refreshArtists } = await useFetch(`${apiBase}/api/artist/list`, { credentials: "include" });
+const { data: trackedArtists, refresh: refreshArtists } = await useFetch(
+  `${apiBase}/api/artist/list`,
+  { credentials: "include" },
+);
 
 async function handleSearch() {
   if (!searchQuery.value.trim()) return;
@@ -44,7 +47,7 @@ async function addArtist(artist: { id: string; name: string; disambiguation?: st
   try {
     await $fetch(`${apiBase}/api/artist/add`, {
       method: "POST",
-      body: { musicbrainzId: artist.id },
+      body: { mbid: artist.id },
       credentials: "include",
     });
     await refreshArtists();
@@ -107,16 +110,15 @@ function closeModal() {
         <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
         <div class="absolute bottom-0 left-0 right-0 p-2">
           <p class="text-xs font-medium text-white truncate">{{ artist.name }}</p>
-          <p v-if="artist.disambiguation" class="text-[11px] text-gray-500 truncate">{{ artist.disambiguation }}</p>
+          <p v-if="artist.disambiguation" class="text-[11px] text-gray-500 truncate">
+            {{ artist.disambiguation }}
+          </p>
         </div>
       </NuxtLink>
     </div>
 
     <!-- Empty state -->
-    <div
-      v-else
-      class="flex flex-col items-center justify-center min-h-[40vh] gap-3 text-center"
-    >
+    <div v-else class="flex flex-col items-center justify-center min-h-[40vh] gap-3 text-center">
       <Icon name="lucide:music" class="w-10 h-10 text-gray-600" />
       <p class="text-gray-400 text-sm">No artists yet. Add one to get started.</p>
     </div>
@@ -131,15 +133,14 @@ function closeModal() {
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
-        <div
-          v-if="showAddModal"
-          class="fixed inset-0 z-50 flex items-center justify-center px-4"
-        >
+        <div v-if="showAddModal" class="fixed inset-0 z-50 flex items-center justify-center px-4">
           <!-- Backdrop -->
           <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="closeModal" />
 
           <!-- Modal -->
-          <div class="relative w-full max-w-md bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+          <div
+            class="relative w-full max-w-md bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl overflow-hidden"
+          >
             <!-- Header -->
             <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
               <h2 class="text-sm font-semibold text-white">Add Artist</h2>
@@ -191,7 +192,11 @@ function closeModal() {
                   @click="handleLoadMore"
                   :disabled="loadingMore"
                   class="mt-2 w-full py-2 text-sm text-gray-400 border border-white/10 rounded-lg disabled:animate-pulse transition-colors"
-                  :class="loadingMore ? 'opacity-60 cursor-not-allowed' : 'hover:text-white hover:bg-white/5'"
+                  :class="
+                    loadingMore
+                      ? 'opacity-60 cursor-not-allowed'
+                      : 'hover:text-white hover:bg-white/5'
+                  "
                 >
                   {{ loadingMore ? "Loading..." : "Load more" }}
                 </button>
@@ -199,7 +204,9 @@ function closeModal() {
 
               <!-- No results -->
               <p
-                v-else-if="!searching && searchQuery && loadedArtists.length === 0 && r$.artistName.$dirty"
+                v-else-if="
+                  !searching && searchQuery && loadedArtists.length === 0 && r$.artistName.$dirty
+                "
                 class="mt-4 text-sm text-gray-500 text-center"
               >
                 No results found.
