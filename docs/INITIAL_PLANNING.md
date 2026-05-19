@@ -51,6 +51,9 @@ kyoku/
 - Cron-based update system with request-driven priority
 - Exposes REST API for queries + WS endpoint for real-time update subscriptions
 - Hub instances connect to it, not the other way around
+- Single binary, 2 goroutines:
+  1. **Echo server** - REST + WS on same port
+  2. **Worker** - MusicBrainz fetching, cron/priority queue, writes to DB, signals server via Go channel to push updates to subscribed hubs
 
 ### fs (Go/Echo)
 
