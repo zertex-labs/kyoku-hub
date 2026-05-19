@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { IArtistMatch } from "musicbrainz-api";
+const config = useRuntimeConfig();
+const apiBase = config.public.apiBaseUrl as string;
 
 const searchStore = useMBAristSearchStore();
 const { r$, loadedArtists, hasMore } = storeToRefs(searchStore);
@@ -11,7 +12,7 @@ const loadingMore = ref(false);
 const adding = ref(false);
 
 // Fetch tracked artists reactively
-const { data: trackedArtists, refresh: refreshArtists } = await useFetch("/api/artist/list");
+const { data: trackedArtists, refresh: refreshArtists } = await useFetch(`${apiBase}/api/artist/list`, { credentials: "include" });
 
 async function handleSearch() {
   if (!searchQuery.value.trim()) return;
@@ -37,13 +38,14 @@ async function handleLoadMore() {
   }
 }
 
-async function addArtist(artist: IArtistMatch) {
+async function addArtist(artist: { id: string; name: string; disambiguation?: string }) {
   if (adding.value) return;
   adding.value = true;
   try {
-    await $fetch("/api/artist/add", {
+    await $fetch(`${apiBase}/api/artist/add`, {
       method: "POST",
       body: { musicbrainzId: artist.id },
+      credentials: "include",
     });
     await refreshArtists();
     showAddModal.value = false;
