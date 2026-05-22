@@ -5,6 +5,16 @@ const apiBase = config.public.apiBaseUrl as string;
 const searchStore = useMBAristSearchStore();
 const { r$, loadedArtists, hasMore } = storeToRefs(searchStore);
 
+interface TrackedArtist {
+  mb_artist_id: string;
+  name: string;
+  disambiguation: string;
+  status: string;
+  active: boolean;
+  created_at: string;
+  synced_at?: string;
+}
+
 const showAddModal = ref(false);
 const searchQuery = ref("");
 const searching = ref(false);
@@ -12,7 +22,7 @@ const loadingMore = ref(false);
 const adding = ref(false);
 
 // Fetch tracked artists reactively
-const { data: trackedArtists, refresh: refreshArtists } = await useFetch(
+const { data: trackedArtists, refresh: refreshArtists } = await useFetch<TrackedArtist[]>(
   `${apiBase}/api/artist/list`,
   { credentials: "include" },
 );
@@ -73,6 +83,19 @@ function closeModal() {
   searchQuery.value = "";
   loadedArtists.value = [];
 }
+
+async function removeArtist(mbArtistId: string) {
+  try {
+    await $fetch(`${apiBase}/api/artist/remove`, {
+      method: "POST",
+      body: { mbid: mbArtistId },
+      credentials: "include",
+    });
+    await refreshArtists();
+  } catch (e: any) {
+    console.error("Failed to remove artist:", e.data?.statusMessage || e.message);
+  }
+}
 </script>
 
 <template>
@@ -93,18 +116,12 @@ function closeModal() {
       v-if="trackedArtists?.length"
       class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3"
     >
-      <NuxtLink
+      <div
         v-for="artist in trackedArtists"
-        :key="artist.id"
+        :key="artist.mb_artist_id"
         class="group relative rounded-lg overflow-hidden aspect-[3/4] cursor-pointer bg-white/5"
       >
-        <NuxtImg
-          v-if="artist.imageUrl"
-          :src="artist.imageUrl"
-          :alt="artist.name"
-          class="w-full h-full object-cover transition-transform group-hover:scale-105"
-        />
-        <div v-else class="w-full h-full flex items-center justify-center">
+        <div class="w-full h-full flex items-center justify-center">
           <Icon name="lucide:music" class="w-8 h-8 text-gray-600" />
         </div>
         <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
@@ -114,7 +131,14 @@ function closeModal() {
             {{ artist.disambiguation }}
           </p>
         </div>
-      </NuxtLink>
+        <!-- Remove button -->
+        <button
+          @click.prevent="removeArtist(artist.mb_artist_id)"
+          class="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/60 text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-black/80 transition-all"
+        >
+          <Icon name="lucide:x" class="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
 
     <!-- Empty state -->

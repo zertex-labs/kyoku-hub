@@ -39,6 +39,25 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 	CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 	CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+
+	CREATE TABLE IF NOT EXISTS artists (
+		mb_artist_id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		disambiguation TEXT DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'queued',
+		active BOOLEAN NOT NULL DEFAULT true,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		synced_at TIMESTAMPTZ
+	);
+
+	CREATE TABLE IF NOT EXISTS user_artists (
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		mb_artist_id TEXT NOT NULL REFERENCES artists(mb_artist_id) ON DELETE CASCADE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, mb_artist_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_user_artists_artist ON user_artists(mb_artist_id);
 	`
 
 	_, err := pool.Exec(ctx, schema)

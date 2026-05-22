@@ -15,3 +15,13 @@ type Session struct {
 	ExpiresAt time.Time `json:"-"`
 	CreatedAt time.Time `json:"-"`
 }
+
+type Artist struct {
+	MBArtistID     string     `json:"mb_artist_id"`
+	Name           string     `json:"name"`
+	Disambiguation string     `json:"disambiguation"`
+	Status         string     `json:"status"`
+	Active         bool       `json:"active"`
+	CreatedAt      time.Time  `json:"created_at"`
+	SyncedAt       *time.Time `json:"synced_at,omitempty"`
+}
