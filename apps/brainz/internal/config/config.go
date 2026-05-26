@@ -17,7 +17,8 @@ type Config struct {
 	LogLevel string
 
 	// Worker
-	WorkerPollInterval time.Duration
+	WorkerPollInterval           time.Duration
+	WorkerMinimumRefetchInterval time.Duration
 
 	// Last.fm
 	LastFMAPIKey string
@@ -34,7 +35,8 @@ func Load() *Config {
 		DBUrl:    getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5433/brainz?sslmode=disable"),
 		LogLevel: getEnv("LOG_LEVEL", "debug"),
 
-		WorkerPollInterval: getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
+		WorkerPollInterval:           getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
+		WorkerMinimumRefetchInterval: getEnvDuration("WORKER_MINIMUM_REFETCH_INTERVAL", 24*time.Hour),
 
 		LastFMAPIKey: getEnv("LASTFM_API_KEY", ""),
 

@@ -51,44 +51,46 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) Poll(ctx context.Context) {
-	// Pick next artist from priority queue
+	// Pick next artist from priority queue:
+	// 1. Artists with pending requests (most requests first)
+	// 2. Artists never fetched (oldest created_at first)
+	// 3. Stale artists past minimum refetch interval (oldest last_fetched_at first)
 	var mbArtistID string
 	var totalRequests int
 
-	// Fetch next artist based on:
-	// - first artist with most requests
-	// - if no artists with request fall back to "oldest" fetched artist
+	refetchSeconds := int(w.cfg.WorkerMinimumRefetchInterval.Seconds())
+
 	err := w.db.QueryRow(ctx, `
 		SELECT a.mb_artist_id, COALESCE(SUM(r.request_count), 0)::int AS total_requests
 		FROM artists a
 		LEFT JOIN artist_requests r ON r.mb_artist_id = a.mb_artist_id
-		GROUP BY a.mb_artist_id
+		GROUP BY a.mb_artist_id, a.last_fetched_at, a.created_at
+		HAVING
+			COALESCE(SUM(r.request_count), 0) > 0
+			OR a.last_fetched_at IS NULL
+			OR a.last_fetched_at < NOW() - $1 * INTERVAL '1 second'
 		ORDER BY
+			CASE
+				WHEN COALESCE(SUM(r.request_count), 0) > 0 THEN 0
+				WHEN a.last_fetched_at IS NULL THEN 1
+				ELSE 2
+			END,
 			COALESCE(SUM(r.request_count), 0) DESC,
-			a.last_fetched_at ASC NULLS FIRST
+			a.created_at ASC,
+			a.last_fetched_at ASC
 		LIMIT 1
-	`).Scan(&mbArtistID, &totalRequests)
+	`, refetchSeconds).Scan(&mbArtistID, &totalRequests)
 
 	if err != nil {
 		w.logger.Debug("worker poll: no artists in queue")
 		return
 	}
 
-	// Only process if there are pending requests or never fetched
-	if totalRequests == 0 {
-		var lastFetched *time.Time
-		w.db.QueryRow(ctx, `SELECT last_fetched_at FROM artists WHERE mb_artist_id = $1`, mbArtistID).Scan(&lastFetched)
-		if lastFetched != nil {
-			w.logger.Debug("worker poll: all artists synced, idle")
-			return
-		}
-	}
-
 	w.logger.Info("syncing artist", zap.String("mb_artist_id", mbArtistID), zap.Int("requests", totalRequests))
-	w.syncArtist(ctx, mbArtistID)
+	w.SyncArtist(ctx, mbArtistID)
 }
 
-func (w *Worker) syncArtist(ctx context.Context, mbArtistID string) {
+func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 	// 1. Fetch artist from MusicBrainz
 	artist, err := w.mb.LookupArtist(ctx, mbArtistID)
 	if err != nil {
