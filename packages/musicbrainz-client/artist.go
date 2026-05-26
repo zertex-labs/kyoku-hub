@@ -80,8 +80,12 @@ func (c *Client) BrowseReleaseGroups(ctx context.Context, artistMBID string) ([]
 	offset := 0
 
 	for {
-		u := fmt.Sprintf("%s/release-group?artist=%s&fmt=json&limit=%d&offset=%d",
-			c.baseURL, url.PathEscape(artistMBID), limit, offset)
+		params := url.Values{}
+		params.Set("artist", artistMBID)
+		params.Set("fmt", "json")
+		params.Set("limit", fmt.Sprintf("%d", limit))
+		params.Set("offset", fmt.Sprintf("%d", offset))
+		u := fmt.Sprintf("%s/release-group?%s", c.baseURL, params.Encode())
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
