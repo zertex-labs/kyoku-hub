@@ -16,13 +16,14 @@ type Artist struct {
 }
 
 type ReleaseGroup struct {
-	MBReleaseGroupID string    `json:"-"`
-	MBArtistID       string    `json:"-"`
-	Title            string    `json:"title"`
-	PrimaryType      string    `json:"primary_type"`
-	Disambiguation   string    `json:"disambiguation"`
-	FirstReleaseDate time.Time `json:"first_release_date"`
-	CreatedAt        string    `json:"created_at"`
+	MBReleaseGroupID string `json:"mb_release_group_id"`
+	MBArtistID       string `json:"mb_artist_id"`
+	Title            string `json:"title"`
+	PrimaryType      string `json:"primary_type"`
+	SecondaryTypes   string `json:"secondary_types"`
+	Disambiguation   string `json:"disambiguation"`
+	FirstReleaseDate string `json:"first_release_date"`
+	CreatedAt        string `json:"created_at"`
 }
 
 type Release struct {

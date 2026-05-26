@@ -17,6 +17,15 @@ func (a ArtistLookup) CacheKey() string {
 	return "artist:" + a.MBID
 }
 
+// -- Release Groups for Artist (release-groups:{artist_mbid})
+type ReleaseGroupsLookup struct {
+	MBID string
+}
+
+func (r ReleaseGroupsLookup) CacheKey() string {
+	return "release-groups:" + r.MBID
+}
+
 // -- Release Group (release-group:{mbid})
 type ReleaseGroupLookup struct {
 	MBID string

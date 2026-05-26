@@ -46,12 +46,16 @@ func (h *AuthHandler) Register(g *echo.Group) {
 func (h *AuthHandler) Authorize(c echo.Context) error {
 	// Generate PKCE code verifier (43-128 chars, base64url)
 	verifierBytes := make([]byte, 32)
-	rand.Read(verifierBytes)
+	if _, err := rand.Read(verifierBytes); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate verifier"})
+	}
 	codeVerifier := base64.RawURLEncoding.EncodeToString(verifierBytes)
 
 	// Generate state
 	stateBytes := make([]byte, 16)
-	rand.Read(stateBytes)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to generate state"})
+	}
 	state := base64.RawURLEncoding.EncodeToString(stateBytes)
 
 	// Code challenge = base64url(sha256(code_verifier))
@@ -114,13 +118,13 @@ func (h *AuthHandler) Callback(c echo.Context) error {
 	// Exchange code for token
 	tokenResp, err := h.exchangeCode(code, verifierCookie.Value)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "token exchange failed: " + err.Error()})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "token exchange failed"})
 	}
 
 	// Fetch user info
 	userInfo, err := h.fetchUserInfo(tokenResp.AccessToken)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch user info: " + err.Error()})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch user info"})
 	}
 
 	// Find or create user
@@ -275,8 +279,6 @@ func (h *AuthHandler) fetchUserInfo(accessToken string) (*userInfoResponse, erro
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("userinfo endpoint returned %d: %s", resp.StatusCode, string(body))
 	}
-
-	fmt.Printf("[DEBUG] MusicBrainz userinfo response: %s\n", string(body))
 
 	var info userInfoResponse
 	if err := json.Unmarshal(body, &info); err != nil {

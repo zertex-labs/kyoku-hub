@@ -76,3 +76,50 @@ func (c *Client) LookupArtist(ctx context.Context, mbid string, inc ...string) (
 	}
 	return &artist, nil
 }
+
+// BrowseReleaseGroups fetches all release groups for an artist, paginating through all results.
+func (c *Client) BrowseReleaseGroups(ctx context.Context, artistMBID string) ([]ReleaseGroup, error) {
+	var all []ReleaseGroup
+	limit := 100
+	offset := 0
+
+	for {
+		u := fmt.Sprintf("%s/release-group?artist=%s&fmt=json&limit=%d&offset=%d",
+			c.baseURL, url.PathEscape(artistMBID), limit, offset)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := c.do(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("musicbrainz: browse release-groups returned %d", resp.StatusCode)
+		}
+
+		var result struct {
+			ReleaseGroupCount  int            `json:"release-group-count"`
+			ReleaseGroupOffset int            `json:"release-group-offset"`
+			ReleaseGroups      []ReleaseGroup `json:"release-groups"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+
+		all = append(all, result.ReleaseGroups...)
+
+		if len(all) >= result.ReleaseGroupCount {
+			break
+		}
+		offset += limit
+	}
+
+	return all, nil
+}

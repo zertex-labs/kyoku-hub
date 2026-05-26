@@ -20,6 +20,9 @@ type Config struct {
 	ForceUpdateThreshold int
 	WorkerPollInterval   time.Duration
 
+	// Last.fm
+	LastFMAPIKey string
+
 	// Cache
 	CacheMaxSizeMB int64
 	CacheHitWindow  time.Duration
@@ -34,6 +37,8 @@ func Load() *Config {
 
 		ForceUpdateThreshold: getEnvInt("FORCE_UPDATE_THRESHOLD", 100),
 		WorkerPollInterval:   getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
+
+		LastFMAPIKey: getEnv("LASTFM_API_KEY", ""),
 
 		CacheMaxSizeMB: int64(getEnvInt("CACHE_MAX_SIZE_MB", 256)),
 		CacheHitWindow:  getEnvDuration("CACHE_HIT_WINDOW", 1*time.Hour),

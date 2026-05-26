@@ -13,6 +13,9 @@ type Config struct {
 	BaseURL                string // Backend base URL (for OAuth redirect)
 	FrontendURL            string // Frontend URL (for CORS + post-login redirect)
 	SessionSecret          string
+	BrainzWSURL            string // Brainz WS endpoint URL
+	BrainzAPIURL           string // Brainz HTTP API base URL
+	InstanceID             string // This hub's unique instance ID
 }
 
 func Load() (*Config, error) {
@@ -24,6 +27,9 @@ func Load() (*Config, error) {
 		BaseURL:                getEnv("BASE_URL", "http://localhost:8080"),
 		FrontendURL:            getEnv("FRONTEND_URL", "http://localhost:3000"),
 		SessionSecret:          getEnv("SESSION_SECRET", "change-me-in-production-please"),
+		BrainzWSURL:            getEnv("BRAINZ_WS_URL", "ws://localhost:8081/ws"),
+		BrainzAPIURL:           getEnv("BRAINZ_API_URL", "http://localhost:8081/api"),
+		InstanceID:             getEnv("INSTANCE_ID", "hub-dev-01"),
 	}
 
 	if cfg.MusicBrainzClientID == "" {

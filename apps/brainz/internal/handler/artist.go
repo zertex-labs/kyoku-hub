@@ -26,6 +26,7 @@ func NewArtistHandler(db *pgxpool.Pool, cache *cache.Cache, logger *zap.Logger) 
 func (h *ArtistHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/artist/:id", h.GetArtist)
 	g.GET("/artist/:id/release-groups", h.GetReleaseGroups)
+	g.GET("/artist/:id/release-groups/count", h.GetReleaseGroupCount)
 	g.GET("/artist/:id/release-groups/:rgid/releases", h.GetReleases)
 }
 
@@ -58,7 +59,51 @@ func (h *ArtistHandler) GetArtist(c echo.Context) error {
 func (h *ArtistHandler) GetReleaseGroups(c echo.Context) error {
 	id := c.Param("id")
 	h.logger.Debug("get release groups", zap.String("artist_id", id))
-	return c.JSON(http.StatusNotImplemented, map[string]string{"error": "not implemented"})
+
+	cacheKey := cache.GetKeyFor(cache.ReleaseGroupsLookup{MBID: id})
+	if cached, found := h.cache.Get(cacheKey); found {
+		return c.JSONBlob(http.StatusOK, cached)
+	}
+
+	rows, err := h.db.Query(context.Background(),
+		`SELECT mb_release_group_id, title, primary_type, secondary_types, disambiguation, first_release_date
+		 FROM release_groups WHERE mb_artist_id = $1
+		 ORDER BY first_release_date DESC`, id,
+	)
+	if err != nil {
+		h.logger.Error("failed to query release groups", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+	defer rows.Close()
+
+	var releaseGroups []model.ReleaseGroup
+	for rows.Next() {
+		var rg model.ReleaseGroup
+		if err := rows.Scan(&rg.MBReleaseGroupID, &rg.Title, &rg.PrimaryType, &rg.SecondaryTypes, &rg.Disambiguation, &rg.FirstReleaseDate); err != nil {
+			h.logger.Error("failed to scan release group", zap.Error(err))
+			continue
+		}
+		rg.MBArtistID = id
+		releaseGroups = append(releaseGroups, rg)
+	}
+
+	data, _ := json.Marshal(releaseGroups)
+	h.cache.Set(cacheKey, data)
+
+	return c.JSONBlob(http.StatusOK, data)
+}
+
+func (h *ArtistHandler) GetReleaseGroupCount(c echo.Context) error {
+	id := c.Param("id")
+	var count int
+	err := h.db.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM release_groups WHERE mb_artist_id = $1`, id,
+	).Scan(&count)
+	if err != nil {
+		h.logger.Error("failed to count release groups", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+	return c.JSON(http.StatusOK, map[string]int{"count": count})
 }
 
 func (h *ArtistHandler) GetReleases(c echo.Context) error {

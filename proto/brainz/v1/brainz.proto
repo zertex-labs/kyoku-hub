@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package brainz.v1;
+
+option go_package = "github.com/zertex-labs/kyoku-hub/proto/gen/brainz/v1";
+
+// Envelope wraps all messages sent over the WS connection.
+// Each message has exactly one payload field set.
+message Envelope {
+  oneof payload {
+    // Hub -> Brainz
+    Subscribe subscribe = 1;
+    Unsubscribe unsubscribe = 2;
+    RequestUpdate request_update = 3;
+
+    // Brainz -> Hub
+    ArtistUpdated artist_updated = 10;
+    ArtistStatusChanged artist_status_changed = 11;
+  }
+}
+
+// Hub -> Brainz: subscribe to artist updates
+message Subscribe {
+  repeated string mb_artist_ids = 1;
+}
+
+// Hub -> Brainz: unsubscribe from artist updates
+message Unsubscribe {
+  repeated string mb_artist_ids = 1;
+}
+
+// Hub -> Brainz: request priority update for an artist
+message RequestUpdate {
+  string mb_artist_id = 1;
+}
+
+// Brainz -> Hub: artist data has been synced
+message ArtistUpdated {
+  string mb_artist_id = 1;
+  string name = 2;
+  string disambiguation = 3;
+  string image_url = 4;
+  string description = 5;
+  string type = 6;
+  string country = 7;
+  repeated ReleaseGroup release_groups = 8;
+}
+
+// Brainz -> Hub: artist sync status changed
+message ArtistStatusChanged {
+  string mb_artist_id = 1;
+  string status = 2; // "queued", "processing", "synced"
+}
+
+message ReleaseGroup {
+  string mb_release_group_id = 1;
+  string title = 2;
+  string primary_type = 3;
+  string first_release_date = 4;
+}

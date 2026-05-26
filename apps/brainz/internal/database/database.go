@@ -31,6 +31,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) error 
 		disambiguation TEXT DEFAULT '',
 		type TEXT DEFAULT '',
 		country TEXT DEFAULT '',
+		image_url TEXT DEFAULT '',
+		description TEXT DEFAULT '',
+		fallback_release_group_id TEXT DEFAULT '',
 		last_fetched_at TIMESTAMPTZ,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
@@ -40,6 +43,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) error 
 		mb_artist_id TEXT NOT NULL REFERENCES artists(mb_artist_id) ON DELETE CASCADE,
 		title TEXT NOT NULL,
 		primary_type TEXT DEFAULT '',
+		secondary_types TEXT DEFAULT '',
 		disambiguation TEXT DEFAULT '',
 		first_release_date TEXT DEFAULT '',
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

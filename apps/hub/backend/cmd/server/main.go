@@ -10,7 +10,9 @@ import (
 	"go.uber.org/zap"
 
 	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
+	brainzpb "github.com/zertex-labs/kyoku-hub/proto/gen/brainz/v1"
 
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/brainzclient"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
@@ -65,7 +67,21 @@ func main() {
 	authHandler := handler.NewAuthHandler(cfg, q)
 	authHandler.Register(e.Group("/api/auth"))
 
-	artistHandler := handler.NewArtistHandler(cfg, q, mb)
+	// Brainz WS client
+	bc := brainzclient.New(cfg.BrainzWSURL, cfg.InstanceID, q, log)
+	bc.OnArtistUpdated = func(ctx context.Context, msg *brainzpb.ArtistUpdated) {
+		if err := q.UpdateArtistFromBrainz(ctx, msg.MbArtistId, msg.Name, msg.Disambiguation, msg.ImageUrl, msg.Description, len(msg.ReleaseGroups)); err != nil {
+			log.Error("failed to update artist from brainz", zap.String("mb_artist_id", msg.MbArtistId), zap.Error(err))
+		}
+	}
+	bc.OnStatusChanged = func(ctx context.Context, msg *brainzpb.ArtistStatusChanged) {
+		if err := q.UpdateArtistStatus(ctx, msg.MbArtistId, msg.Status); err != nil {
+			log.Error("failed to update artist status", zap.String("mb_artist_id", msg.MbArtistId), zap.Error(err))
+		}
+	}
+	go bc.Run(ctx)
+
+	artistHandler := handler.NewArtistHandler(cfg, q, mb, bc)
 	artistHandler.Register(e.Group("/api/artist"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
