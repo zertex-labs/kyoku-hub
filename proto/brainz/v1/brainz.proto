@@ -57,4 +57,5 @@ message ReleaseGroup {
   string title = 2;
   string primary_type = 3;
   string first_release_date = 4;
+  repeated string secondary_types = 5;
 }

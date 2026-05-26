@@ -450,6 +450,7 @@ type ReleaseGroup struct {
 	Title            string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
 	PrimaryType      string                 `protobuf:"bytes,3,opt,name=primary_type,json=primaryType,proto3" json:"primary_type,omitempty"`
 	FirstReleaseDate string                 `protobuf:"bytes,4,opt,name=first_release_date,json=firstReleaseDate,proto3" json:"first_release_date,omitempty"`
+	SecondaryTypes   []string               `protobuf:"bytes,5,rep,name=secondary_types,json=secondaryTypes,proto3" json:"secondary_types,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -512,6 +513,13 @@ func (x *ReleaseGroup) GetFirstReleaseDate() string {
 	return ""
 }
 
+func (x *ReleaseGroup) GetSecondaryTypes() []string {
+	if x != nil {
+		return x.SecondaryTypes
+	}
+	return nil
+}
+
 var File_brainz_v1_brainz_proto protoreflect.FileDescriptor
 
 const file_brainz_v1_brainz_proto_rawDesc = "" +
@@ -545,12 +553,13 @@ const file_brainz_v1_brainz_proto_rawDesc = "" +
 	"\x13ArtistStatusChanged\x12 \n" +
 	"\fmb_artist_id\x18\x01 \x01(\tR\n" +
 	"mbArtistId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\"\xa4\x01\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\"\xcd\x01\n" +
 	"\fReleaseGroup\x12-\n" +
 	"\x13mb_release_group_id\x18\x01 \x01(\tR\x10mbReleaseGroupId\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12!\n" +
 	"\fprimary_type\x18\x03 \x01(\tR\vprimaryType\x12,\n" +
-	"\x12first_release_date\x18\x04 \x01(\tR\x10firstReleaseDateB6Z4github.com/zertex-labs/kyoku-hub/proto/gen/brainz/v1b\x06proto3"
+	"\x12first_release_date\x18\x04 \x01(\tR\x10firstReleaseDate\x12'\n" +
+	"\x0fsecondary_types\x18\x05 \x03(\tR\x0esecondaryTypesB6Z4github.com/zertex-labs/kyoku-hub/proto/gen/brainz/v1b\x06proto3"
 
 var (
 	file_brainz_v1_brainz_proto_rawDescOnce sync.Once
