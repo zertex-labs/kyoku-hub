@@ -121,7 +121,7 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 		)
 	}
 
-	// 3. Determine fallback release group (first album, or first anything)
+	// 4. Determine fallback release group (first album, or first anything) then use CAA as fallback
 	fallbackRGID := ""
 	for _, rg := range releaseGroups {
 		if rg.PrimaryType == "Album" {
@@ -133,12 +133,12 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 		fallbackRGID = releaseGroups[0].ID
 	}
 
-	// If no Last.fm image, use CAA release group cover as fallback
 	if imageURL == "" && fallbackRGID != "" {
+		// TODO: maybe front-250?
 		imageURL = fmt.Sprintf("https://coverartarchive.org/release-group/%s/front-500", fallbackRGID)
 	}
 
-	// 4. Upsert artist in DB
+	// 5. Upsert artist in DB
 	_, err = w.db.Exec(ctx, `
 		INSERT INTO artists (mb_artist_id, name, sort_name, disambiguation, type, country, image_url, description, fallback_release_group_id, last_fetched_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
@@ -158,21 +158,39 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 		return
 	}
 
-	// 5. Upsert release groups
-	for _, rg := range releaseGroups {
-		secondaryTypes := strings.Join(rg.SecondaryTypes, ", ")
-		_, err = w.db.Exec(ctx, `
-			INSERT INTO release_groups (mb_release_group_id, mb_artist_id, title, primary_type, secondary_types, disambiguation, first_release_date)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (mb_release_group_id) DO UPDATE SET
-				title = EXCLUDED.title,
-				primary_type = EXCLUDED.primary_type,
-				secondary_types = EXCLUDED.secondary_types,
-				disambiguation = EXCLUDED.disambiguation,
-				first_release_date = EXCLUDED.first_release_date
-		`, rg.ID, mbArtistID, rg.Title, rg.PrimaryType, secondaryTypes, rg.Disambiguation, rg.FirstReleaseDate)
+	// 6. Upsert release groups in batches
+	upsertBatchSize := 50
+	for i := 0; i < len(releaseGroups); i += upsertBatchSize {
+		end := i + upsertBatchSize
+		if end > len(releaseGroups) {
+			end = len(releaseGroups)
+		}
+		batch := releaseGroups[i:end]
+
+		var qb strings.Builder
+		qb.WriteString(`INSERT INTO release_groups (mb_release_group_id, mb_artist_id, title, primary_type, secondary_types, disambiguation, first_release_date) VALUES `)
+
+		args := make([]interface{}, 0, len(batch)*7)
+		for j, rg := range batch {
+			if j > 0 {
+				qb.WriteString(", ")
+			}
+			base := j * 7
+			fmt.Fprintf(&qb, "($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+				base+1, base+2, base+3, base+4, base+5, base+6, base+7)
+			args = append(args, rg.ID, mbArtistID, rg.Title, rg.PrimaryType, strings.Join(rg.SecondaryTypes, ", "), rg.Disambiguation, rg.FirstReleaseDate)
+		}
+
+		qb.WriteString(` ON CONFLICT (mb_release_group_id) DO UPDATE SET
+			title = EXCLUDED.title,
+			primary_type = EXCLUDED.primary_type,
+			secondary_types = EXCLUDED.secondary_types,
+			disambiguation = EXCLUDED.disambiguation,
+			first_release_date = EXCLUDED.first_release_date`)
+
+		_, err = w.db.Exec(ctx, qb.String(), args...)
 		if err != nil {
-			w.logger.Error("failed to upsert release group", zap.String("rg_id", rg.ID), zap.Error(err))
+			w.logger.Error("failed to upsert release group batch", zap.Int("batch_start", i), zap.Error(err))
 		}
 	}
 
@@ -183,8 +201,8 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 	}
 
 	// 7. Invalidate cache
-	w.cache.Delete(fmt.Sprintf("artist:%s", mbArtistID))
-	w.cache.Delete(fmt.Sprintf("release-groups:%s", mbArtistID))
+	w.cache.Delete(cache.ArtistLookup{MBID: mbArtistID}.CacheKey())
+	w.cache.Delete(cache.ReleaseGroupsLookup{MBID: mbArtistID}.CacheKey())
 
 	// 8. Push update to subscribed hubs via WS
 	releaseGroupsPb := make([]*brainzpb.ReleaseGroup, 0, len(releaseGroups))
