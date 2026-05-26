@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -29,16 +30,16 @@ type Config struct {
 	CacheTTLTiers  []CacheTier
 }
 
-func Load() *Config {
+func Load() (*Config, error) {
 	cfg := &Config{
 		Port:     getEnv("PORT", "8081"),
-		DBUrl:    getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5433/brainz?sslmode=disable"),
+		DBUrl:    os.Getenv("DATABASE_URL"),
 		LogLevel: getEnv("LOG_LEVEL", "debug"),
 
 		WorkerPollInterval:           getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
 		WorkerMinimumRefetchInterval: getEnvDuration("WORKER_MINIMUM_REFETCH_INTERVAL", 24*time.Hour),
 
-		LastFMAPIKey: getEnv("LASTFM_API_KEY", ""),
+		LastFMAPIKey: os.Getenv("LASTFM_API_KEY"),
 
 		CacheMaxSizeMB: int64(getEnvInt("CACHE_MAX_SIZE_MB", 256)),
 		CacheHitWindow:  getEnvDuration("CACHE_HIT_WINDOW", 1*time.Hour),
@@ -49,7 +50,15 @@ func Load() *Config {
 			{MinHits: 0, TTL: 10 * time.Minute},
 		},
 	}
-	return cfg
+
+	required := []string{"DATABASE_URL", "LASTFM_API_KEY"}
+	for _, key := range required {
+		if os.Getenv(key) == "" {
+			return nil, fmt.Errorf("required environment variable %s is not set", key)
+		}
+	}
+
+	return cfg, nil
 }
 
 func getEnv(key, fallback string) string {

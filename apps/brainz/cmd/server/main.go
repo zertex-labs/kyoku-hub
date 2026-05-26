@@ -26,7 +26,10 @@ func main() {
 	logger, _ := zap.NewDevelopment(zap.WithCaller(false))
 	defer logger.Sync()
 
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Fatal("configuration error", zap.Error(err))
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
