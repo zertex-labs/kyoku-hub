@@ -20,23 +20,28 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:                   getEnv("PORT", "8080"),
-		DatabaseURL:            getEnv("DATABASE_URL", "postgres://kyoku:kyoku@localhost:5432/kyoku_hub?sslmode=disable"),
-		MusicBrainzClientID:    os.Getenv("MUSICBRAINZ_CLIENT_ID"),
+		Port:                    getEnv("PORT", "8080"),
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		MusicBrainzClientID:     os.Getenv("MUSICBRAINZ_CLIENT_ID"),
 		MusicBrainzClientSecret: os.Getenv("MUSICBRAINZ_CLIENT_SECRET"),
-		BaseURL:                getEnv("BASE_URL", "http://localhost:8080"),
-		FrontendURL:            getEnv("FRONTEND_URL", "http://localhost:3000"),
-		SessionSecret:          getEnv("SESSION_SECRET", "change-me-in-production-please"),
-		BrainzWSURL:            getEnv("BRAINZ_WS_URL", "ws://localhost:8081/ws"),
-		BrainzAPIURL:           getEnv("BRAINZ_API_URL", "http://localhost:8081/api"),
-		InstanceID:             getEnv("INSTANCE_ID", "hub-dev-01"),
+		BaseURL:                 getEnv("BASE_URL", "http://localhost:8080"),
+		FrontendURL:             getEnv("FRONTEND_URL", "http://localhost:3000"),
+		SessionSecret:           os.Getenv("SESSION_SECRET"),
+		BrainzWSURL:             getEnv("BRAINZ_WS_URL", "ws://localhost:8081/ws"),
+		BrainzAPIURL:            getEnv("BRAINZ_API_URL", "http://localhost:8081/api"),
+		InstanceID:              getEnv("INSTANCE_ID", "hub-dev-01"),
 	}
 
-	if cfg.MusicBrainzClientID == "" {
-		return nil, fmt.Errorf("MUSICBRAINZ_CLIENT_ID is required")
+	required := []string{
+		"DATABASE_URL",
+		"MUSICBRAINZ_CLIENT_ID",
+		"MUSICBRAINZ_CLIENT_SECRET",
+		"SESSION_SECRET",
 	}
-	if cfg.MusicBrainzClientSecret == "" {
-		return nil, fmt.Errorf("MUSICBRAINZ_CLIENT_SECRET is required")
+	for _, key := range required {
+		if os.Getenv(key) == "" {
+			return nil, fmt.Errorf("required environment variable %s is not set", key)
+		}
 	}
 
 	return cfg, nil

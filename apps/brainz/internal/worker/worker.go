@@ -105,24 +105,20 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 		return
 	}
 
-	// 2. Fetch Last.fm image + bio
+	// 3. Fetch Last.fm image(TODO: last.fm seems to have deprecated their image values, and now depend on user provided images which aren't in the api) + description
 	imageURL := ""
 	description := ""
-	if w.cfg.LastFMAPIKey != "" {
-		info, err := musicbrainz.FetchLastFM(ctx, w.cfg.LastFMAPIKey, mbArtistID)
-		if err != nil {
-			w.logger.Warn("lastfm fetch failed", zap.String("mb_artist_id", mbArtistID), zap.Error(err))
-		} else {
-			imageURL = info.ImageURL
-			description = info.Description
-			w.logger.Info("lastfm response",
-				zap.String("mb_artist_id", mbArtistID),
-				zap.String("image_url", info.ImageURL),
-				zap.Int("description_len", len(info.Description)),
-			)
-		}
+	info, err := musicbrainz.FetchLastFM(ctx, w.cfg.LastFMAPIKey, mbArtistID)
+	if err != nil {
+		w.logger.Warn("lastfm fetch failed", zap.String("mb_artist_id", mbArtistID), zap.Error(err))
 	} else {
-		w.logger.Warn("lastfm api key not set, skipping image fetch")
+		imageURL = info.ImageURL
+		description = info.Description
+		w.logger.Info("lastfm response",
+			zap.String("mb_artist_id", mbArtistID),
+			zap.String("image_url", info.ImageURL),
+			zap.Int("description_len", len(info.Description)),
+		)
 	}
 
 	// 3. Determine fallback release group (first album, or first anything)
