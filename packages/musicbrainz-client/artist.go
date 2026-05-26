@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // SearchArtist searches for artists by name.
@@ -43,17 +44,12 @@ func (c *Client) SearchArtist(ctx context.Context, query string, limit, offset i
 // LookupArtist fetches a single artist by MBID.
 // Pass inc values like "release-groups" to include additional data.
 func (c *Client) LookupArtist(ctx context.Context, mbid string, inc ...string) (*Artist, error) {
-	u := fmt.Sprintf("%s/artist/%s?fmt=json", c.baseURL, url.PathEscape(mbid))
+	params := url.Values{}
+	params.Set("fmt", "json")
 	if len(inc) > 0 {
-		incStr := ""
-		for i, v := range inc {
-			if i > 0 {
-				incStr += "+"
-			}
-			incStr += v
-		}
-		u += "&inc=" + url.QueryEscape(incStr)
+		params.Set("inc", strings.Join(inc, "+"))
 	}
+	u := fmt.Sprintf("%s/artist/%s?%s", c.baseURL, url.PathEscape(mbid), params.Encode())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
