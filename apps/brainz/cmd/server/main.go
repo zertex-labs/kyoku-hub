@@ -15,7 +15,9 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/database"
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/handler"
+	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/hub"
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/worker"
+	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
 )
 
 func main() {
@@ -46,8 +48,14 @@ func main() {
 	}
 	defer c.Close()
 
+	// MusicBrainz client
+	mb := musicbrainz.NewClient("Kyoku/0.1 (https://github.com/zertex-labs/kyoku-hub)")
+
+	// Hub (manages connected hub instances)
+	h := hub.New(logger)
+
 	// Worker
-	w := worker.New(db, c, cfg, logger)
+	w := worker.New(db, c, cfg, mb, h, logger)
 	go w.Run(ctx)
 
 	// Echo server
@@ -58,7 +66,7 @@ func main() {
 	artistHandler := handler.NewArtistHandler(db, c, logger)
 	artistHandler.RegisterRoutes(api)
 
-	wsHandler := handler.NewWSHandler(logger)
+	wsHandler := handler.NewWSHandler(h, db, logger)
 	wsHandler.RegisterRoutes(e)
 
 	go func() {

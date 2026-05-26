@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -8,6 +10,7 @@ import (
 	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
 
 	"github.com/labstack/echo/v4"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/brainzclient"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
@@ -17,10 +20,11 @@ type ArtistHandler struct {
 	cfg     *config.Config
 	queries *queries.Queries
 	mb      *musicbrainz.Client
+	bc      *brainzclient.Client
 }
 
-func NewArtistHandler(cfg *config.Config, q *queries.Queries, mb *musicbrainz.Client) *ArtistHandler {
-	return &ArtistHandler{cfg: cfg, queries: q, mb: mb}
+func NewArtistHandler(cfg *config.Config, q *queries.Queries, mb *musicbrainz.Client, bc *brainzclient.Client) *ArtistHandler {
+	return &ArtistHandler{cfg: cfg, queries: q, mb: mb, bc: bc}
 }
 
 func (h *ArtistHandler) Register(g *echo.Group) {
@@ -28,6 +32,8 @@ func (h *ArtistHandler) Register(g *echo.Group) {
 	g.POST("/add", h.AddArtistForUser, mw.AuthRequired(h.queries))
 	g.POST("/remove", h.RemoveArtistForUser, mw.AuthRequired(h.queries))
 	g.GET("/list", h.ListUserArtists, mw.AuthRequired(h.queries))
+	g.GET("/:id", h.GetArtistDetail, mw.AuthRequired(h.queries))
+	g.GET("/:id/release-groups", h.GetArtistReleaseGroups, mw.AuthRequired(h.queries))
 }
 
 func (h *ArtistHandler) SearchForArtist(c echo.Context) error {
@@ -82,7 +88,8 @@ func (h *ArtistHandler) AddArtistForUser(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to link artist"})
 	}
 
-	// TODO: send subscribe to brainz via WS
+	// Send subscribe to brainz via WS
+	h.bc.Subscribe([]string{res.ID})
 
 	return c.JSON(http.StatusOK, artist)
 }
@@ -113,7 +120,8 @@ func (h *ArtistHandler) RemoveArtistForUser(c echo.Context) error {
 		if err := h.queries.DeactivateArtist(ctx, body.MBID); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to deactivate artist"})
 		}
-		// TODO: send unsubscribe to brainz via WS
+		// Send unsubscribe to brainz via WS
+		h.bc.Unsubscribe([]string{body.MBID})
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
@@ -132,4 +140,34 @@ func (h *ArtistHandler) ListUserArtists(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, artists)
+}
+
+func (h *ArtistHandler) GetArtistDetail(c echo.Context) error {
+	id := c.Param("id")
+	url := fmt.Sprintf("%s/artist/%s", h.cfg.BrainzAPIURL, id)
+	fmt.Printf("[hub] proxying artist detail: %s\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("[hub] brainz error: %v\n", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "brainz unavailable"})
+	}
+	defer resp.Body.Close()
+	fmt.Printf("[hub] brainz responded: %d\n", resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	return c.JSONBlob(resp.StatusCode, body)
+}
+
+func (h *ArtistHandler) GetArtistReleaseGroups(c echo.Context) error {
+	id := c.Param("id")
+	url := fmt.Sprintf("%s/artist/%s/release-groups", h.cfg.BrainzAPIURL, id)
+	fmt.Printf("[hub] proxying release groups: %s\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("[hub] brainz error: %v\n", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "brainz unavailable"})
+	}
+	defer resp.Body.Close()
+	fmt.Printf("[hub] brainz responded: %d\n", resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	return c.JSONBlob(resp.StatusCode, body)
 }

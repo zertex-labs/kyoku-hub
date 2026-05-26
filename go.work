@@ -4,4 +4,5 @@ use (
 	./apps/brainz
 	./apps/hub/backend
 	./packages/musicbrainz-client
+	./proto/gen
 )

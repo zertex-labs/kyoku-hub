@@ -43,7 +43,6 @@ onMounted(() => {
           class="flex gap-4 sm:gap-6 text-sm *:text-gray-400 [&>*:hover]:text-white *:transition-colors"
         >
           <NuxtLink to="/search">Search</NuxtLink>
-          <NuxtLink to="/artists">Artists</NuxtLink>
           <NuxtLink to="/chat">Chat</NuxtLink>
         </div>
         <div class="relative" data-user-menu>

@@ -11,11 +11,11 @@ func (q *Queries) UpsertArtist(ctx context.Context, mbArtistID, name, disambigua
 		INSERT INTO artists (mb_artist_id, name, disambiguation, status, active)
 		VALUES ($1, $2, $3, 'queued', true)
 		ON CONFLICT (mb_artist_id) DO UPDATE SET active = true
-		RETURNING mb_artist_id, name, disambiguation, status, active, created_at, synced_at`
+		RETURNING mb_artist_id, name, disambiguation, image_url, description, release_group_count, status, active, created_at, synced_at`
 
 	var a model.Artist
 	err := q.Pool.QueryRow(ctx, query, mbArtistID, name, disambiguation).Scan(
-		&a.MBArtistID, &a.Name, &a.Disambiguation, &a.Status, &a.Active, &a.CreatedAt, &a.SyncedAt,
+		&a.MBArtistID, &a.Name, &a.Disambiguation, &a.ImageURL, &a.Description, &a.ReleaseGroupCount, &a.Status, &a.Active, &a.CreatedAt, &a.SyncedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (q *Queries) DeactivateArtist(ctx context.Context, mbArtistID string) error
 
 func (q *Queries) GetUserArtists(ctx context.Context, userID string) ([]model.Artist, error) {
 	query := `
-		SELECT a.mb_artist_id, a.name, a.disambiguation, a.status, a.active, a.created_at, a.synced_at
+		SELECT a.mb_artist_id, a.name, a.disambiguation, a.image_url, a.description, a.release_group_count, a.status, a.active, a.created_at, a.synced_at
 		FROM artists a
 		JOIN user_artists ua ON ua.mb_artist_id = a.mb_artist_id
 		WHERE ua.user_id = $1
@@ -63,10 +63,31 @@ func (q *Queries) GetUserArtists(ctx context.Context, userID string) ([]model.Ar
 	var artists []model.Artist
 	for rows.Next() {
 		var a model.Artist
-		if err := rows.Scan(&a.MBArtistID, &a.Name, &a.Disambiguation, &a.Status, &a.Active, &a.CreatedAt, &a.SyncedAt); err != nil {
+		if err := rows.Scan(&a.MBArtistID, &a.Name, &a.Disambiguation, &a.ImageURL, &a.Description, &a.ReleaseGroupCount, &a.Status, &a.Active, &a.CreatedAt, &a.SyncedAt); err != nil {
 			return nil, err
 		}
 		artists = append(artists, a)
 	}
 	return artists, nil
+}
+
+func (q *Queries) UpdateArtistFromBrainz(ctx context.Context, mbArtistID, name, disambiguation, imageURL, description string, releaseGroupCount int) error {
+	_, err := q.Pool.Exec(ctx, `
+		UPDATE artists SET
+			name = $2,
+			disambiguation = $3,
+			image_url = $4,
+			description = $5,
+			release_group_count = $6,
+			status = 'synced',
+			synced_at = NOW()
+		WHERE mb_artist_id = $1`,
+		mbArtistID, name, disambiguation, imageURL, description, releaseGroupCount,
+	)
+	return err
+}
+
+func (q *Queries) UpdateArtistStatus(ctx context.Context, mbArtistID, status string) error {
+	_, err := q.Pool.Exec(ctx, `UPDATE artists SET status = $2 WHERE mb_artist_id = $1`, mbArtistID, status)
+	return err
 }

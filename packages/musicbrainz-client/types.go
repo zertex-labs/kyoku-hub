@@ -25,12 +25,24 @@ type Artist struct {
 	Type           string         `json:"type"`
 	Country        string         `json:"country"`
 	ReleaseGroups  []ReleaseGroup `json:"release-groups,omitempty"`
+	Relations      []Relation     `json:"relations,omitempty"`
+}
+
+type Relation struct {
+	Type       string      `json:"type"`
+	TargetType string      `json:"target-type"`
+	URL        RelationURL `json:"url"`
+}
+
+type RelationURL struct {
+	Resource string `json:"resource"`
 }
 
 type ReleaseGroup struct {
-	ID             string `json:"id"`
-	Title          string `json:"title"`
-	PrimaryType    string `json:"primary-type"`
-	Disambiguation string `json:"disambiguation"`
-	FirstReleaseDate string `json:"first-release-date"`
+	ID               string   `json:"id"`
+	Title            string   `json:"title"`
+	PrimaryType      string   `json:"primary-type"`
+	SecondaryTypes   []string `json:"secondary-types"`
+	Disambiguation   string   `json:"disambiguation"`
+	FirstReleaseDate string   `json:"first-release-date"`
 }
