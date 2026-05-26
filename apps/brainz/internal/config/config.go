@@ -17,8 +17,7 @@ type Config struct {
 	LogLevel string
 
 	// Worker
-	ForceUpdateThreshold int
-	WorkerPollInterval   time.Duration
+	WorkerPollInterval time.Duration
 
 	// Last.fm
 	LastFMAPIKey string
@@ -35,8 +34,7 @@ func Load() *Config {
 		DBUrl:    getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5433/brainz?sslmode=disable"),
 		LogLevel: getEnv("LOG_LEVEL", "debug"),
 
-		ForceUpdateThreshold: getEnvInt("FORCE_UPDATE_THRESHOLD", 100),
-		WorkerPollInterval:   getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
+		WorkerPollInterval: getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
 
 		LastFMAPIKey: getEnv("LASTFM_API_KEY", ""),
 

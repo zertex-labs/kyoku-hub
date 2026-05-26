@@ -48,7 +48,7 @@ func main() {
 	}
 	defer c.Close()
 
-	// MusicBrainz client
+	// MusicBrainz client(TODO: dynamically update version)
 	mb := musicbrainz.NewClient("Kyoku/0.1 (https://github.com/zertex-labs/kyoku-hub)")
 
 	// Hub (manages connected hub instances)

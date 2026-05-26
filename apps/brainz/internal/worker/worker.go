@@ -34,7 +34,6 @@ func New(db *pgxpool.Pool, cache *cache.Cache, cfg *config.Config, mb *musicbrai
 func (w *Worker) Run(ctx context.Context) {
 	w.logger.Info("worker started",
 		zap.Duration("poll_interval", w.cfg.WorkerPollInterval),
-		zap.Int("force_threshold", w.cfg.ForceUpdateThreshold),
 	)
 
 	ticker := time.NewTicker(w.cfg.WorkerPollInterval)
@@ -46,27 +45,29 @@ func (w *Worker) Run(ctx context.Context) {
 			w.logger.Info("worker shutting down")
 			return
 		case <-ticker.C:
-			w.poll(ctx)
+			w.Poll(ctx)
 		}
 	}
 }
 
-func (w *Worker) poll(ctx context.Context) {
+func (w *Worker) Poll(ctx context.Context) {
 	// Pick next artist from priority queue
 	var mbArtistID string
 	var totalRequests int
 
+	// Fetch next artist based on:
+	// - first artist with most requests
+	// - if no artists with request fall back to "oldest" fetched artist
 	err := w.db.QueryRow(ctx, `
 		SELECT a.mb_artist_id, COALESCE(SUM(r.request_count), 0)::int AS total_requests
 		FROM artists a
 		LEFT JOIN artist_requests r ON r.mb_artist_id = a.mb_artist_id
 		GROUP BY a.mb_artist_id
 		ORDER BY
-			CASE WHEN COALESCE(SUM(r.request_count), 0) >= $1 THEN 0 ELSE 1 END,
 			COALESCE(SUM(r.request_count), 0) DESC,
 			a.last_fetched_at ASC NULLS FIRST
 		LIMIT 1
-	`, w.cfg.ForceUpdateThreshold).Scan(&mbArtistID, &totalRequests)
+	`).Scan(&mbArtistID, &totalRequests)
 
 	if err != nil {
 		w.logger.Debug("worker poll: no artists in queue")
