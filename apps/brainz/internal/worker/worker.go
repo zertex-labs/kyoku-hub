@@ -212,6 +212,7 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 			Title:            rg.Title,
 			PrimaryType:      rg.PrimaryType,
 			FirstReleaseDate: rg.FirstReleaseDate,
+			SecondaryTypes:   rg.SecondaryTypes,
 		})
 	}
 
