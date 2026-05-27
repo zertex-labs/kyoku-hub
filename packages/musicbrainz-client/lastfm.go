@@ -58,7 +58,7 @@ func FetchLastFM(ctx context.Context, apiKey, mbid string) (*LastFMInfo, error) 
 				Size string `json:"size"`
 			} `json:"image"`
 			Bio struct {
-				Summary string `json:"summary"`
+				Content string `json:"content"`
 			} `json:"bio"`
 		} `json:"artist"`
 	}
@@ -84,8 +84,8 @@ func FetchLastFM(ctx context.Context, apiKey, mbid string) (*LastFMInfo, error) 
 	}
 
 	// Bio summary — strip HTML tags and Last.fm attribution link
-	if result.Artist.Bio.Summary != "" {
-		info.Description = stripHTML(result.Artist.Bio.Summary)
+	if result.Artist.Bio.Content != "" {
+		info.Description = stripHTML(result.Artist.Bio.Content)
 	}
 
 	return info, nil
