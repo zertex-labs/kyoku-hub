@@ -32,7 +32,7 @@ type Release struct {
 	Title            string    `json:"title"`
 	Status           string    `json:"status"`
 	Country          string    `json:"country"`
-	Date             string    `json:"date"` // todo actual type?
+	Date             string    `json:"date"`
 	Barcode          string    `json:"barcode"`
 	CreatedAt        time.Time `json:"created_at"`
 }
