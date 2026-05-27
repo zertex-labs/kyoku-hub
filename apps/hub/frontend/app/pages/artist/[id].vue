@@ -41,7 +41,7 @@ const { data: artist } = await useFetch<BrainzArtist>(`${apiBase}/api/artist/${i
   credentials: "include",
 });
 
-const { data: releaseGroups } = await useFetch<ReleaseGroup[]>(
+const { data: releaseGroups, refresh: refreshReleaseGroups } = await useFetch<ReleaseGroup[]>(
   `${apiBase}/api/artist/${id}/release-groups`,
   { credentials: "include" },
 );
@@ -98,6 +98,35 @@ const sortedTypes = computed(() =>
     return a.localeCompare(b);
   }),
 );
+
+// SSE: real-time updates for this artist
+const { on, off } = useSSE();
+
+function handleArtistUpdated(data: any) {
+  if (data.mb_artist_id !== id) return;
+  // Update artist info in-place
+  if (artist.value) {
+    artist.value.name = data.name;
+    artist.value.disambiguation = data.disambiguation;
+  }
+  // Update tracked artist in store (for description)
+  const tracked = artistStore.artists.find((a) => a.mb_artist_id === id);
+  if (tracked) {
+    tracked.description = data.description;
+    tracked.image_url = data.image_url;
+    tracked.release_group_count = data.release_group_count;
+    tracked.status = data.status;
+    tracked.synced_at = new Date().toISOString();
+  }
+  // Refetch release groups from backend
+  refreshReleaseGroups();
+}
+
+on("artist:updated", handleArtistUpdated);
+
+onUnmounted(() => {
+  off("artist:updated", handleArtistUpdated);
+});
 </script>
 
 <template>
