@@ -12,3 +12,35 @@ export type IncompleteArtist = {
   have: number;
   total: number;
 };
+
+export interface TrackedArtist {
+  mb_artist_id: string;
+  name: string;
+  disambiguation: string;
+  image_url?: string;
+  description: string;
+  release_group_count: number;
+  status: string;
+  active: boolean;
+  created_at: string;
+  synced_at?: string;
+}
+
+export interface BrainzArtist {
+  name: string;
+  sort_name: string;
+  disambiguation: string;
+  type: string;
+  country: string;
+  last_fetched_at: string;
+  created_at: string;
+}
+
+export interface ReleaseGroup {
+  mb_release_group_id: string;
+  title: string;
+  primary_type: string;
+  secondary_types: string;
+  disambiguation: string;
+  first_release_date: string;
+}

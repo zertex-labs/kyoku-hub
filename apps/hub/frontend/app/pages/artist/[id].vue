@@ -4,6 +4,8 @@ const config = useRuntimeConfig();
 const apiBase = config.public.apiBaseUrl as string;
 const id = route.params.id as string;
 
+const MAX_DESCRIPTION_LENGTH = 350;
+
 const coverErrors = ref<Set<string>>(new Set());
 const coverLoaded = ref<Set<string>>(new Set());
 
@@ -18,25 +20,6 @@ function onCoverError(rgId: string) {
 
 const showBioModal = ref(false);
 
-interface BrainzArtist {
-  name: string;
-  sort_name: string;
-  disambiguation: string;
-  type: string;
-  country: string;
-  last_fetched_at: string;
-  created_at: string;
-}
-
-interface ReleaseGroup {
-  mb_release_group_id: string;
-  title: string;
-  primary_type: string;
-  secondary_types: string;
-  disambiguation: string;
-  first_release_date: string;
-}
-
 const { data: artist } = await useFetch<BrainzArtist>(`${apiBase}/api/artist/${id}`, {
   credentials: "include",
 });
@@ -49,14 +32,18 @@ const { data: releaseGroups, refresh: refreshReleaseGroups } = await useFetch<Re
 // Get description from the artist store (hub stores it)
 const artistStore = useArtistStore();
 await artistStore.fetchArtists();
-const trackedArtist = computed(() =>
-  artistStore.artists.find((a) => a.mb_artist_id === id),
-);
+const trackedArtist = computed(() => artistStore.artists.find((a) => a.mb_artist_id === id));
 
 const description = computed(() => trackedArtist.value?.description || "");
 const truncatedDescription = computed(() => {
-  if (description.value.length <= 200) return description.value;
-  return description.value.slice(0, 200) + "...";
+  // make sure to not cut of the final word
+  let finalLength = MAX_DESCRIPTION_LENGTH;
+  let finalChar = description.value[finalLength];
+  while (finalChar !== " ") {
+    finalLength++;
+    finalChar = description.value[finalLength];
+  }
+  return description.value.substring(0, finalLength) + "...";
 });
 
 // Group release groups by primary_type + secondary_types
@@ -77,7 +64,9 @@ const groupedReleaseGroups = computed(() => {
   }
   // Sort each group by date desc
   for (const type in groups) {
-    groups[type].sort((a, b) => (b.first_release_date || "").localeCompare(a.first_release_date || ""));
+    groups[type].sort((a, b) =>
+      (b.first_release_date || "").localeCompare(a.first_release_date || ""),
+    );
   }
   return groups;
 });
@@ -103,6 +92,7 @@ const sortedTypes = computed(() =>
 const { on, off } = useSSE();
 
 function handleArtistUpdated(data: any) {
+  console.log(data);
   if (data.mb_artist_id !== id) return;
   // Update artist info in-place
   if (artist.value) {
@@ -132,7 +122,10 @@ onUnmounted(() => {
 <template>
   <div v-if="artist">
     <!-- Back -->
-    <NuxtLink to="/" class="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors mb-6">
+    <NuxtLink
+      to="/"
+      class="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors mb-6"
+    >
       <Icon name="lucide:arrow-left" class="w-4 h-4" />
       Back
     </NuxtLink>
@@ -140,7 +133,9 @@ onUnmounted(() => {
     <!-- Header -->
     <div class="mb-6">
       <h1 class="text-3xl font-bold text-white">{{ artist.name }}</h1>
-      <p v-if="artist.disambiguation" class="text-sm text-gray-400 mt-1">{{ artist.disambiguation }}</p>
+      <p v-if="artist.disambiguation" class="text-sm text-gray-400 mt-1">
+        {{ artist.disambiguation }}
+      </p>
       <p class="text-sm text-gray-500 mt-1">{{ releaseGroups?.length || 0 }} Release Groups</p>
 
       <!-- Links -->
@@ -166,11 +161,13 @@ onUnmounted(() => {
 
     <!-- About the Artist -->
     <div v-if="description" class="border-t border-white/5 pt-5 mb-8">
-      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">About the Artist</h2>
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        About the Artist
+      </h2>
       <p class="text-sm text-gray-300 leading-relaxed">
         {{ truncatedDescription }}
         <button
-          v-if="description.length > 200"
+          v-if="description.length > MAX_DESCRIPTION_LENGTH"
           @click="showBioModal = true"
           class="text-orange-400 hover:text-orange-300 ml-1 transition-colors"
         >
@@ -181,35 +178,47 @@ onUnmounted(() => {
 
     <!-- Release Groups by Type -->
     <div class="border-t border-white/5 pt-5">
-      <h2 class="text-lg font-semibold text-white mb-4">
-        Albums by {{ artist.name }}
-      </h2>
+      <h2 class="text-lg font-semibold text-white mb-4">Albums by {{ artist.name }}</h2>
 
       <div v-for="type in sortedTypes" :key="type" class="mb-8">
         <div class="flex items-center gap-2 mb-3">
           <h3 class="text-sm font-semibold text-white">{{ type }}</h3>
-          <span class="text-xs text-gray-500 bg-white/5 px-1.5 py-0.5 rounded">{{ groupedReleaseGroups[type].length }}</span>
+          <span class="text-xs text-gray-500 bg-white/5 px-1.5 py-0.5 rounded">
+            {{ groupedReleaseGroups[type].length }}
+          </span>
         </div>
 
-        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        <div
+          class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
+        >
           <div
             v-for="rg in groupedReleaseGroups[type]"
             :key="rg.mb_release_group_id"
             class="group rounded-lg overflow-hidden bg-white/5 hover:bg-white/[0.08] transition-colors"
           >
             <!-- Cover -->
-            <div class="aspect-square bg-white/[0.03] flex items-center justify-center overflow-hidden relative">
+            <div
+              class="aspect-square bg-white/[0.03] flex items-center justify-center overflow-hidden relative"
+            >
               <template v-if="!coverErrors.has(rg.mb_release_group_id)">
                 <div
                   v-if="!coverLoaded.has(rg.mb_release_group_id)"
                   class="absolute inset-0 bg-white/5 animate-pulse flex items-center justify-center"
                 >
-                  <Icon name="lucide:disc" class="w-10 h-10 text-gray-700 animate-spin" style="animation-duration: 3s" />
+                  <Icon
+                    name="lucide:disc"
+                    class="w-10 h-10 text-gray-700 animate-spin"
+                    style="animation-duration: 3s"
+                  />
                 </div>
                 <NuxtImg
                   :src="`https://coverartarchive.org/release-group/${rg.mb_release_group_id}/front-250`"
                   :alt="rg.title"
-                  :class="coverLoaded.has(rg.mb_release_group_id) ? 'w-full h-full object-cover' : 'w-0 h-0 absolute opacity-0'"
+                  :class="
+                    coverLoaded.has(rg.mb_release_group_id)
+                      ? 'w-full h-full object-cover'
+                      : 'w-0 h-0 absolute opacity-0'
+                  "
                   loading="lazy"
                   @load="onCoverLoad(rg.mb_release_group_id)"
                   @error="onCoverError(rg.mb_release_group_id)"
@@ -220,13 +229,17 @@ onUnmounted(() => {
             <!-- Info -->
             <div class="p-2.5">
               <p class="text-xs font-medium text-white truncate">{{ rg.title }}</p>
-              <p class="text-[11px] text-gray-500 mt-0.5">{{ rg.first_release_date?.slice(0, 4) || '—' }}</p>
+              <p class="text-[11px] text-gray-500 mt-0.5">
+                {{ rg.first_release_date?.slice(0, 4) || "—" }}
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      <p v-if="!releaseGroups?.length" class="text-gray-500 text-sm">No release groups available yet.</p>
+      <p v-if="!releaseGroups?.length" class="text-gray-500 text-sm">
+        No release groups available yet.
+      </p>
     </div>
 
     <!-- Bio Modal -->
@@ -240,16 +253,28 @@ onUnmounted(() => {
         leave-to-class="opacity-0"
       >
         <div v-if="showBioModal" class="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="showBioModal = false" />
-          <div class="relative w-full max-w-lg max-h-[80vh] bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl flex flex-col">
-            <div class="flex items-center justify-between px-5 py-4 border-b border-white/5 shrink-0">
+          <div
+            class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            @click="showBioModal = false"
+          />
+          <div
+            class="relative w-full max-w-lg max-h-[80vh] bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl flex flex-col"
+          >
+            <div
+              class="flex items-center justify-between px-5 py-4 border-b border-white/5 shrink-0"
+            >
               <h2 class="text-sm font-semibold text-white">About {{ artist.name }}</h2>
-              <button @click="showBioModal = false" class="text-gray-500 hover:text-white transition-colors">
+              <button
+                @click="showBioModal = false"
+                class="text-gray-500 hover:text-white transition-colors"
+              >
                 <Icon name="lucide:x" class="w-5 h-5" />
               </button>
             </div>
-            <div class="p-5 overflow-y-auto flex-1 min-h-0">
-              <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{{ description }}</p>
+            <div class="p-4 overflow-y-auto flex-1 min-h-0 mt-1 mb-2">
+              <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line max-h-[200px]">
+                {{ description }}
+              </p>
             </div>
           </div>
         </div>
