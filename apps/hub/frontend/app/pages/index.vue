@@ -15,6 +15,37 @@ const loadingMore = ref(false);
 const adding = ref(false);
 const nameFilter = ref("");
 
+// SSE: real-time artist updates
+const { on, off } = useSSE();
+
+function handleArtistStatus(data: { mb_artist_id: string; status: string }) {
+  const artist = trackedArtists.value.find((a) => a.mb_artist_id === data.mb_artist_id);
+  if (artist) {
+    artist.status = data.status;
+  }
+}
+
+function handleArtistUpdated(data: any) {
+  const artist = trackedArtists.value.find((a) => a.mb_artist_id === data.mb_artist_id);
+  if (artist) {
+    artist.name = data.name;
+    artist.disambiguation = data.disambiguation;
+    artist.image_url = data.image_url;
+    artist.description = data.description;
+    artist.release_group_count = data.release_group_count;
+    artist.status = data.status;
+    artist.synced_at = new Date().toISOString();
+  }
+}
+
+on("artist:status", handleArtistStatus);
+on("artist:updated", handleArtistUpdated);
+
+onUnmounted(() => {
+  off("artist:status", handleArtistStatus);
+  off("artist:updated", handleArtistUpdated);
+});
+
 const filteredArtists = computed(() => {
   if (!nameFilter.value.trim()) return trackedArtists.value;
   const q = nameFilter.value.toLowerCase();

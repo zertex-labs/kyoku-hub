@@ -19,6 +19,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 )
 
 func main() {
@@ -68,18 +69,35 @@ func main() {
 	authHandler.Register(e.Group("/api/auth"))
 
 	// Brainz WS client
+	sseManager := sse.NewManager()
 	bc := brainzclient.New(cfg.BrainzWSURL, cfg.InstanceID, q, log)
 	bc.OnArtistUpdated = func(ctx context.Context, msg *brainzpb.ArtistUpdated) {
 		if err := q.UpdateArtistFromBrainz(ctx, msg.MbArtistId, msg.Name, msg.Disambiguation, msg.ImageUrl, msg.Description, len(msg.ReleaseGroups)); err != nil {
 			log.Error("failed to update artist from brainz", zap.String("mb_artist_id", msg.MbArtistId), zap.Error(err))
 		}
+		sseManager.Broadcast("artist:updated", map[string]interface{}{
+			"mb_artist_id":        msg.MbArtistId,
+			"name":                msg.Name,
+			"disambiguation":      msg.Disambiguation,
+			"image_url":           msg.ImageUrl,
+			"description":         msg.Description,
+			"release_group_count": len(msg.ReleaseGroups),
+			"status":              "synced",
+		})
 	}
 	bc.OnStatusChanged = func(ctx context.Context, msg *brainzpb.ArtistStatusChanged) {
 		if err := q.UpdateArtistStatus(ctx, msg.MbArtistId, msg.Status); err != nil {
 			log.Error("failed to update artist status", zap.String("mb_artist_id", msg.MbArtistId), zap.Error(err))
 		}
+		sseManager.Broadcast("artist:status", map[string]interface{}{
+			"mb_artist_id": msg.MbArtistId,
+			"status":       msg.Status,
+		})
 	}
 	go bc.Run(ctx)
+
+	eventsHandler := handler.NewEventsHandler(sseManager)
+	e.GET("/api/events", eventsHandler.Stream, mw.AuthRequired(q))
 
 	artistHandler := handler.NewArtistHandler(cfg, q, mb, bc)
 	artistHandler.Register(e.Group("/api/artist"))
