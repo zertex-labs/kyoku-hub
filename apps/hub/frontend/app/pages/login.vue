@@ -31,7 +31,7 @@ const apiBase = config.public.apiBaseUrl as string;
           :href="`${apiBase}/api/auth/authorize`"
           class="flex items-center justify-center gap-3 w-full py-3 px-4 bg-orange-500 hover:bg-orange-400 text-white font-medium rounded-lg transition-colors"
         >
-          <BrandIcon name="musicbrainz" class="text-xl" />
+          <BrandIcon name="musicbrainz" class="text-xl size-8" />
           Login with MusicBrainz
         </a>
       </div>
