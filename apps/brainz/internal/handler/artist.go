@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -11,23 +12,54 @@ import (
 
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/cache"
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/model"
+	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
 )
 
 type ArtistHandler struct {
 	db     *pgxpool.Pool
 	cache  *cache.Cache
+	mb     *musicbrainz.Client
 	logger *zap.Logger
 }
 
-func NewArtistHandler(db *pgxpool.Pool, cache *cache.Cache, logger *zap.Logger) *ArtistHandler {
-	return &ArtistHandler{db: db, cache: cache, logger: logger}
+func NewArtistHandler(db *pgxpool.Pool, cache *cache.Cache, mb *musicbrainz.Client, logger *zap.Logger) *ArtistHandler {
+	return &ArtistHandler{db: db, cache: cache, mb: mb, logger: logger}
 }
 
 func (h *ArtistHandler) RegisterRoutes(g *echo.Group) {
+	g.GET("/artist/search", h.SearchArtist)
 	g.GET("/artist/:id", h.GetArtist)
 	g.GET("/artist/:id/release-groups", h.GetReleaseGroups)
 	g.GET("/artist/:id/release-groups/count", h.GetReleaseGroupCount)
 	g.GET("/artist/:id/release-groups/:rgid/releases", h.GetReleases)
+}
+
+func (h *ArtistHandler) SearchArtist(c echo.Context) error {
+	query := c.QueryParam("q")
+	if query == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing query parameter 'q'"})
+	}
+
+	limit := 10
+	offset := 0
+	if v := c.QueryParam("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	if v := c.QueryParam("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	result, err := h.mb.SearchArtist(c.Request().Context(), query, limit, offset)
+	if err != nil {
+		h.logger.Error("failed to search artists", zap.String("query", query), zap.Error(err))
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "musicbrainz search failed"})
+	}
+
+	return c.JSON(http.StatusOK, result)
 }
 
 func (h *ArtistHandler) GetArtist(c echo.Context) error {
@@ -42,9 +74,9 @@ func (h *ArtistHandler) GetArtist(c echo.Context) error {
 
 	artist := &model.Artist{}
 	err := h.db.QueryRow(context.Background(),
-		`SELECT mb_artist_id, name, sort_name, disambiguation, type, country, last_fetched_at, created_at
+		`SELECT mb_artist_id, name, sort_name, disambiguation, type, country, image_url, description, last_fetched_at, created_at
 		 FROM artists WHERE mb_artist_id = $1`, id,
-	).Scan(&artist.MBArtistID, &artist.Name, &artist.SortName, &artist.Disambiguation, &artist.Type, &artist.Country, &artist.LastFetchedAt, &artist.CreatedAt)
+	).Scan(&artist.MBArtistID, &artist.Name, &artist.SortName, &artist.Disambiguation, &artist.Type, &artist.Country, &artist.ImageURL, &artist.Description, &artist.LastFetchedAt, &artist.CreatedAt)
 	if err != nil {
 		h.logger.Error("failed to get artist", zap.Error(err))
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "artist not found"})

@@ -5,12 +5,14 @@ import (
 )
 
 type Artist struct {
-	MBArtistID     string    `json:"-"`
+	MBArtistID     string    `json:"mb_artist_id"`
 	Name           string    `json:"name"`
 	SortName       string    `json:"sort_name"`
 	Disambiguation string    `json:"disambiguation"`
 	Type           string    `json:"type"`
 	Country        string    `json:"country"`
+	ImageURL       string    `json:"image_url"`
+	Description    string    `json:"description"`
 	LastFetchedAt  time.Time `json:"last_fetched_at"`
 	CreatedAt      time.Time `json:"created_at"`
 }

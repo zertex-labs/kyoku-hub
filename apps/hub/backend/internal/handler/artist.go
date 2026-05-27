@@ -1,30 +1,34 @@
 package handler
 
 import (
-	"fmt"
-	"io"
 	"net/http"
-	"strconv"
+	"regexp"
 
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
-	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
 
 	"github.com/labstack/echo/v4"
+	"go.uber.org/zap"
+
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/brainzclient"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
 )
 
+var mbidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+const maxAddsPerHour = 20
+
 type ArtistHandler struct {
-	cfg     *config.Config
-	queries *queries.Queries
-	mb      *musicbrainz.Client
-	bc      *brainzclient.Client
+	cfg       *config.Config
+	queries   *queries.Queries
+	bc        *brainzclient.Client
+	brainzAPI *brainzclient.API
+	logger    *zap.Logger
 }
 
-func NewArtistHandler(cfg *config.Config, q *queries.Queries, mb *musicbrainz.Client, bc *brainzclient.Client) *ArtistHandler {
-	return &ArtistHandler{cfg: cfg, queries: q, mb: mb, bc: bc}
+func NewArtistHandler(cfg *config.Config, q *queries.Queries, bc *brainzclient.Client, brainzAPI *brainzclient.API, logger *zap.Logger) *ArtistHandler {
+	return &ArtistHandler{cfg: cfg, queries: q, bc: bc, brainzAPI: brainzAPI, logger: logger}
 }
 
 func (h *ArtistHandler) Register(g *echo.Group) {
@@ -42,54 +46,65 @@ func (h *ArtistHandler) SearchForArtist(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing query parameter 'q'"})
 	}
 
-	limit := 10
-	offset := 0
-	if v := c.QueryParam("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-			limit = n
-		}
+	limit := c.QueryParam("limit")
+	offset := c.QueryParam("offset")
+
+	path := "/artist/search?q=" + query
+	if limit != "" {
+		path += "&limit=" + limit
 	}
-	if v := c.QueryParam("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
+	if offset != "" {
+		path += "&offset=" + offset
 	}
 
-	result, err := h.mb.SearchArtist(c.Request().Context(), query, limit, offset)
+	status, body, err := h.brainzAPI.ProxyGet(path)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("brainz search failed", zap.String("query", query), zap.Error(err))
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "brainz unavailable"})
 	}
 
-	return c.JSON(http.StatusOK, result)
+	return c.JSONBlob(status, body)
 }
 
 func (h *ArtistHandler) AddArtistForUser(c echo.Context) error {
 	user := c.Get("user").(*model.User)
 
 	var body struct {
-		MBID string `json:"mbid"`
+		MBID           string `json:"mbid"`
+		Name           string `json:"name"`
+		Disambiguation string `json:"disambiguation"`
 	}
-	if err := c.Bind(&body); err != nil || body.MBID == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing mbid"})
+	if err := c.Bind(&body); err != nil || body.MBID == "" || body.Name == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing mbid or name"})
 	}
 
-	// Lookup from MusicBrainz to validate MBID and get canonical data
-	res, err := h.mb.LookupArtist(c.Request().Context(), body.MBID, "")
+	if !mbidRegex.MatchString(body.MBID) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
+	}
+
+	ctx := c.Request().Context()
+
+	// DB-backed rate limit: max adds per hour per user
+	recentAdds, err := h.queries.CountRecentUserAdds(ctx, user.ID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid or lookup failed"})
+		h.logger.Error("failed to check rate limit", zap.Error(err))
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	}
+	if recentAdds >= maxAddsPerHour {
+		return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "too many artist adds, try again later"})
 	}
 
-	artist, err := h.queries.UpsertArtist(c.Request().Context(), res.ID, res.Name, res.Disambiguation)
+	artist, err := h.queries.UpsertArtist(ctx, body.MBID, body.Name, body.Disambiguation)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to upsert artist"})
 	}
 
-	if err := h.queries.LinkUserArtist(c.Request().Context(), user.ID, res.ID); err != nil {
+	if err := h.queries.LinkUserArtist(ctx, user.ID, body.MBID); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to link artist"})
 	}
 
 	// Send subscribe to brainz via WS
-	h.bc.Subscribe([]string{res.ID})
+	h.bc.Subscribe([]string{body.MBID})
 
 	return c.JSON(http.StatusOK, artist)
 }
@@ -102,6 +117,10 @@ func (h *ArtistHandler) RemoveArtistForUser(c echo.Context) error {
 	}
 	if err := c.Bind(&body); err != nil || body.MBID == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing mbid"})
+	}
+
+	if !mbidRegex.MatchString(body.MBID) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
 	}
 
 	ctx := c.Request().Context()
@@ -140,30 +159,30 @@ func (h *ArtistHandler) ListUserArtists(c echo.Context) error {
 
 func (h *ArtistHandler) GetArtistDetail(c echo.Context) error {
 	id := c.Param("id")
-	url := fmt.Sprintf("%s/artist/%s", h.cfg.BrainzAPIURL, id)
-	fmt.Printf("[hub] proxying artist detail: %s\n", url)
-	resp, err := http.Get(url)
+	if !mbidRegex.MatchString(id) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
+	}
+
+	status, body, err := h.brainzAPI.ProxyGet("/artist/" + id)
 	if err != nil {
-		fmt.Printf("[hub] brainz error: %v\n", err)
+		h.logger.Error("brainz proxy failed", zap.String("path", "/artist/"+id), zap.Error(err))
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "brainz unavailable"})
 	}
-	defer resp.Body.Close()
-	fmt.Printf("[hub] brainz responded: %d\n", resp.StatusCode)
-	body, _ := io.ReadAll(resp.Body)
-	return c.JSONBlob(resp.StatusCode, body)
+
+	return c.JSONBlob(status, body)
 }
 
 func (h *ArtistHandler) GetArtistReleaseGroups(c echo.Context) error {
 	id := c.Param("id")
-	url := fmt.Sprintf("%s/artist/%s/release-groups", h.cfg.BrainzAPIURL, id)
-	fmt.Printf("[hub] proxying release groups: %s\n", url)
-	resp, err := http.Get(url)
+	if !mbidRegex.MatchString(id) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
+	}
+
+	status, body, err := h.brainzAPI.ProxyGet("/artist/" + id + "/release-groups")
 	if err != nil {
-		fmt.Printf("[hub] brainz error: %v\n", err)
+		h.logger.Error("brainz proxy failed", zap.String("path", "/artist/"+id+"/release-groups"), zap.Error(err))
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "brainz unavailable"})
 	}
-	defer resp.Body.Close()
-	fmt.Printf("[hub] brainz responded: %d\n", resp.StatusCode)
-	body, _ := io.ReadAll(resp.Body)
-	return c.JSONBlob(resp.StatusCode, body)
+
+	return c.JSONBlob(status, body)
 }

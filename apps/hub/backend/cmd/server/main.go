@@ -9,7 +9,6 @@ import (
 	echomw "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/zap"
 
-	musicbrainz "github.com/zertex-labs/kyoku-hub/packages/musicbrainz-client"
 	brainzpb "github.com/zertex-labs/kyoku-hub/proto/gen/brainz/v1"
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/brainzclient"
@@ -46,7 +45,6 @@ func main() {
 	}
 
 	q := queries.New(pool)
-	mb := musicbrainz.NewClient("Kyoku/0.1.0 (https://github.com/zertex-labs/kyoku-hub)")
 
 	e := echo.New()
 	e.HideBanner = true
@@ -86,6 +84,17 @@ func main() {
 		})
 	}
 	bc.OnStatusChanged = func(ctx context.Context, msg *brainzpb.ArtistStatusChanged) {
+		if msg.Status == "failed" {
+			// Invalid artist — clean up from hub DB
+			if err := q.DeleteArtistAndLinks(ctx, msg.MbArtistId); err != nil {
+				log.Error("failed to delete invalid artist", zap.String("mb_artist_id", msg.MbArtistId), zap.Error(err))
+			}
+			sseManager.Broadcast("artist:failed", map[string]interface{}{
+				"mb_artist_id": msg.MbArtistId,
+			})
+			return
+		}
+
 		if err := q.UpdateArtistStatus(ctx, msg.MbArtistId, msg.Status); err != nil {
 			log.Error("failed to update artist status", zap.String("mb_artist_id", msg.MbArtistId), zap.Error(err))
 		}
@@ -99,7 +108,10 @@ func main() {
 	eventsHandler := handler.NewEventsHandler(sseManager)
 	e.GET("/api/events", eventsHandler.Stream, mw.AuthRequired(q))
 
-	artistHandler := handler.NewArtistHandler(cfg, q, mb, bc)
+	// Brainz HTTP API client (for proxying REST requests)
+	brainzAPI := brainzclient.NewAPI(cfg.BrainzAPIURL)
+
+	artistHandler := handler.NewArtistHandler(cfg, q, bc, brainzAPI, log)
 	artistHandler.Register(e.Group("/api/artist"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))

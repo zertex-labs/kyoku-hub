@@ -18,6 +18,10 @@ function connect(apiBase: string) {
     dispatch("artist:updated", JSON.parse(e.data));
   });
 
+  eventSource.addEventListener("artist:failed", (e) => {
+    dispatch("artist:failed", JSON.parse(e.data));
+  });
+
   eventSource.onerror = () => {
     // EventSource auto-reconnects, nothing to do
   };

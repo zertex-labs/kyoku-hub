@@ -96,3 +96,21 @@ func (q *Queries) UpdateArtistStatus(ctx context.Context, mbArtistID, status str
 	_, err := q.Pool.Exec(ctx, `UPDATE artists SET status = $2 WHERE mb_artist_id = $1`, mbArtistID, status)
 	return err
 }
+
+func (q *Queries) CountRecentUserAdds(ctx context.Context, userID string) (int, error) {
+	var count int
+	err := q.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_artists WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+		userID,
+	).Scan(&count)
+	return count, err
+}
+
+func (q *Queries) DeleteArtistAndLinks(ctx context.Context, mbArtistID string) error {
+	// Delete user_artists links first (FK), then the artist row
+	if _, err := q.Pool.Exec(ctx, `DELETE FROM user_artists WHERE mb_artist_id = $1`, mbArtistID); err != nil {
+		return err
+	}
+	_, err := q.Pool.Exec(ctx, `DELETE FROM artists WHERE mb_artist_id = $1`, mbArtistID)
+	return err
+}
