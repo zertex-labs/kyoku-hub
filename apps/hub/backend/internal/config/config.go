@@ -3,19 +3,21 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
-	Port                   string
-	DatabaseURL            string
-	MusicBrainzClientID    string
+	Port                    string
+	DatabaseURL             string
+	MusicBrainzClientID     string
 	MusicBrainzClientSecret string
-	BaseURL                string // Backend base URL (for OAuth redirect)
-	FrontendURL            string // Frontend URL (for CORS + post-login redirect)
-	SessionSecret          string
-	BrainzWSURL            string // Brainz WS endpoint URL
-	BrainzAPIURL           string // Brainz HTTP API base URL
-	InstanceID             string // This hub's unique instance ID
+	BaseURL                 string // Backend base URL (for OAuth redirect)
+	FrontendURL             string // Frontend URL (for CORS + post-login redirect)
+	SessionSecret           string
+	BrainzWSURL             string // Brainz WS endpoint URL
+	BrainzAPIURL            string // Brainz HTTP API base URL
+	InstanceID              string // This hub's unique instance ID
+	SecureCookies           bool   // Whether to set Secure flag on cookies (derived from BaseURL)
 }
 
 func Load() (*Config, error) {
@@ -31,6 +33,8 @@ func Load() (*Config, error) {
 		BrainzAPIURL:            getEnv("BRAINZ_API_URL", "http://localhost:8081/api"),
 		InstanceID:              getEnv("INSTANCE_ID", "hub-dev-01"),
 	}
+
+	cfg.SecureCookies = strings.HasPrefix(cfg.BaseURL, "https://")
 
 	required := []string{
 		"DATABASE_URL",

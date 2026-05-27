@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -94,6 +95,11 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 	// 1. Fetch artist from MusicBrainz
 	artist, err := w.mb.LookupArtist(ctx, mbArtistID)
 	if err != nil {
+		if errors.Is(err, musicbrainz.ErrNotFound) {
+			w.logger.Warn("artist not found on musicbrainz, cleaning up", zap.String("mb_artist_id", mbArtistID))
+			w.handleInvalidArtist(ctx, mbArtistID)
+			return
+		}
 		w.logger.Error("failed to lookup artist", zap.String("mb_artist_id", mbArtistID), zap.Error(err))
 		return
 	}
@@ -236,4 +242,39 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 		zap.String("image_url", imageURL),
 		zap.Int("release_groups", len(releaseGroups)),
 	)
+}
+
+// handleInvalidArtist cleans up a bogus artist (invalid MBID) from the database
+// and notifies subscribed hubs that the artist failed validation.
+func (w *Worker) handleInvalidArtist(ctx context.Context, mbArtistID string) {
+	// Broadcast failed status to subscribed hubs before deleting
+	w.hub.Broadcast(mbArtistID, &brainzpb.Envelope{
+		Payload: &brainzpb.Envelope_ArtistStatusChanged{
+			ArtistStatusChanged: &brainzpb.ArtistStatusChanged{
+				MbArtistId: mbArtistID,
+				Status:     "failed",
+			},
+		},
+	})
+
+	// Clean up request counts
+	if _, err := w.db.Exec(ctx, `DELETE FROM artist_requests WHERE mb_artist_id = $1`, mbArtistID); err != nil {
+		w.logger.Error("failed to delete artist requests for invalid artist", zap.String("mb_artist_id", mbArtistID), zap.Error(err))
+	}
+
+	// Clean up subscriptions
+	if _, err := w.db.Exec(ctx, `DELETE FROM hub_subscriptions WHERE mb_artist_id = $1`, mbArtistID); err != nil {
+		w.logger.Error("failed to delete hub subscriptions for invalid artist", zap.String("mb_artist_id", mbArtistID), zap.Error(err))
+	}
+
+	// Delete the artist row (cascades to release_groups, etc.)
+	if _, err := w.db.Exec(ctx, `DELETE FROM artists WHERE mb_artist_id = $1`, mbArtistID); err != nil {
+		w.logger.Error("failed to delete invalid artist", zap.String("mb_artist_id", mbArtistID), zap.Error(err))
+	}
+
+	// Invalidate cache
+	w.cache.Delete(cache.ArtistLookup{MBID: mbArtistID}.CacheKey())
+	w.cache.Delete(cache.ReleaseGroupsLookup{MBID: mbArtistID}.CacheKey())
+
+	w.logger.Info("cleaned up invalid artist", zap.String("mb_artist_id", mbArtistID))
 }

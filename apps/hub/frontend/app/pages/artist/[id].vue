@@ -29,21 +29,12 @@ const { data: releaseGroups, refresh: refreshReleaseGroups } = await useFetch<Re
   { credentials: "include" },
 );
 
-// Get description from the artist store (hub stores it)
-const artistStore = useArtistStore();
-await artistStore.fetchArtists();
-const trackedArtist = computed(() => artistStore.artists.find((a) => a.mb_artist_id === id));
-
-const description = computed(() => trackedArtist.value?.description || "");
+const description = computed(() => artist.value?.description || "");
 const truncatedDescription = computed(() => {
-  // make sure to not cut of the final word
-  let finalLength = MAX_DESCRIPTION_LENGTH;
-  let finalChar = description.value[finalLength];
-  while (finalChar !== " ") {
-    finalLength++;
-    finalChar = description.value[finalLength];
-  }
-  return description.value.substring(0, finalLength) + "...";
+  if (description.value.length <= MAX_DESCRIPTION_LENGTH) return description.value;
+  const truncated = description.value.slice(0, MAX_DESCRIPTION_LENGTH);
+  const lastSpace = truncated.lastIndexOf(" ");
+  return (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + "...";
 });
 
 // Group release groups by primary_type + secondary_types
@@ -92,21 +83,13 @@ const sortedTypes = computed(() =>
 const { on, off } = useSSE();
 
 function handleArtistUpdated(data: any) {
-  console.log(data);
   if (data.mb_artist_id !== id) return;
   // Update artist info in-place
   if (artist.value) {
     artist.value.name = data.name;
     artist.value.disambiguation = data.disambiguation;
-  }
-  // Update tracked artist in store (for description)
-  const tracked = artistStore.artists.find((a) => a.mb_artist_id === id);
-  if (tracked) {
-    tracked.description = data.description;
-    tracked.image_url = data.image_url;
-    tracked.release_group_count = data.release_group_count;
-    tracked.status = data.status;
-    tracked.synced_at = new Date().toISOString();
+    artist.value.image_url = data.image_url;
+    artist.value.description = data.description;
   }
   // Refetch release groups from backend
   refreshReleaseGroups();

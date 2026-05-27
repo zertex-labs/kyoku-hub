@@ -31,7 +31,7 @@ func (c *Client) SearchArtist(ctx context.Context, query string, limit, offset i
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("musicbrainz: artist search returned %d", resp.StatusCode)
+		return nil, &APIError{StatusCode: resp.StatusCode, Endpoint: "artist search"}
 	}
 
 	var result ArtistSearchResult
@@ -62,8 +62,11 @@ func (c *Client) LookupArtist(ctx context.Context, mbid string, inc ...string) (
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("musicbrainz: artist lookup returned %d", resp.StatusCode)
+		return nil, &APIError{StatusCode: resp.StatusCode, Endpoint: "artist lookup"}
 	}
 
 	var artist Artist
@@ -97,9 +100,13 @@ func (c *Client) BrowseReleaseGroups(ctx context.Context, artistMBID string) ([]
 			return nil, err
 		}
 
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return nil, ErrNotFound
+		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			return nil, fmt.Errorf("musicbrainz: browse release-groups returned %d", resp.StatusCode)
+			return nil, &APIError{StatusCode: resp.StatusCode, Endpoint: "browse release-groups"}
 		}
 
 		var result struct {

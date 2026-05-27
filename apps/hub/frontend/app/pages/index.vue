@@ -38,12 +38,22 @@ function handleArtistUpdated(data: any) {
   }
 }
 
+function handleArtistFailed(data: { mb_artist_id: string }) {
+  // Remove the failed artist from the local list
+  const idx = trackedArtists.value.findIndex((a) => a.mb_artist_id === data.mb_artist_id);
+  if (idx !== -1) {
+    trackedArtists.value.splice(idx, 1);
+  }
+}
+
 on("artist:status", handleArtistStatus);
 on("artist:updated", handleArtistUpdated);
+on("artist:failed", handleArtistFailed);
 
 onUnmounted(() => {
   off("artist:status", handleArtistStatus);
   off("artist:updated", handleArtistUpdated);
+  off("artist:failed", handleArtistFailed);
 });
 
 const filteredArtists = computed(() => {
@@ -93,7 +103,7 @@ async function addArtist(artist: { id: string; name: string; disambiguation?: st
   if (adding.value) return;
   adding.value = true;
   try {
-    await artistStore.addArtist(artist.id);
+    await artistStore.addArtist(artist.id, artist.name, artist.disambiguation ?? "");
     showAddModal.value = false;
     searchQuery.value = "";
     loadedArtists.value = [];

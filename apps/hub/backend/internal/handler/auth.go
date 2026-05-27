@@ -69,6 +69,7 @@ func (h *AuthHandler) Authorize(c echo.Context) error {
 		Path:     "/",
 		MaxAge:   600,
 		HttpOnly: true,
+		Secure:   h.cfg.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 	c.SetCookie(&http.Cookie{
@@ -77,6 +78,7 @@ func (h *AuthHandler) Authorize(c echo.Context) error {
 		Path:     "/",
 		MaxAge:   600,
 		HttpOnly: true,
+		Secure:   h.cfg.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -146,6 +148,7 @@ func (h *AuthHandler) Callback(c echo.Context) error {
 		Path:     "/",
 		MaxAge:   int(sessionDuration.Seconds()),
 		HttpOnly: true,
+		Secure:   h.cfg.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 

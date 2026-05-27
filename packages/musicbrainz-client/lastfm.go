@@ -49,8 +49,6 @@ func FetchLastFM(ctx context.Context, apiKey, mbid string) (*LastFMInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("[lastfm] response: %s\n", string(body))
-
 	var result struct {
 		Artist struct {
 			Image []struct {

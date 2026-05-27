@@ -26,11 +26,14 @@ export interface TrackedArtist {
 }
 
 export interface BrainzArtist {
+  mb_artist_id: string;
   name: string;
   sort_name: string;
   disambiguation: string;
   type: string;
   country: string;
+  image_url: string;
+  description: string;
   last_fetched_at: string;
   created_at: string;
 }

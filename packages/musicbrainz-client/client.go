@@ -2,11 +2,26 @@ package musicbrainz
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
 	"golang.org/x/time/rate"
 )
+
+// ErrNotFound is returned when MusicBrainz returns a 404 for a lookup.
+var ErrNotFound = errors.New("musicbrainz: not found")
+
+// APIError represents a non-OK response from MusicBrainz.
+type APIError struct {
+	StatusCode int
+	Endpoint   string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("musicbrainz: %s returned %d", e.Endpoint, e.StatusCode)
+}
 
 type Client struct {
 	http      *http.Client

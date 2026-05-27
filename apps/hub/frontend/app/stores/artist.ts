@@ -15,10 +15,10 @@ export const useArtistStore = defineStore("artist", () => {
     loaded.value = true;
   }
 
-  async function addArtist(mbid: string) {
+  async function addArtist(mbid: string, name: string, disambiguation: string) {
     await $fetch(`${apiBase}/api/artist/add`, {
       method: "POST",
-      body: { mbid },
+      body: { mbid, name, disambiguation },
       credentials: "include",
     });
     await fetchArtists();

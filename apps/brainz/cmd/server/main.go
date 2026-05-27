@@ -66,7 +66,7 @@ func main() {
 	e.HideBanner = true
 
 	api := e.Group("/api")
-	artistHandler := handler.NewArtistHandler(db, c, logger)
+	artistHandler := handler.NewArtistHandler(db, c, mb, logger)
 	artistHandler.RegisterRoutes(api)
 
 	wsHandler := handler.NewWSHandler(h, db, logger)
