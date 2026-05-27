@@ -24,7 +24,7 @@ type Artist struct {
 	Description       string     `json:"description"`
 	ReleaseGroupCount int        `json:"release_group_count"`
 	Status            string     `json:"status"`
-	Active            bool       `json:"active"`
+	Active            bool       `json:"-"`
 	CreatedAt         time.Time  `json:"created_at"`
 	SyncedAt          *time.Time `json:"synced_at,omitempty"`
 }

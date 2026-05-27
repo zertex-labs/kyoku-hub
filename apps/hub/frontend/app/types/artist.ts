@@ -21,7 +21,6 @@ export interface TrackedArtist {
   description: string;
   release_group_count: number;
   status: string;
-  active: boolean;
   created_at: string;
   synced_at?: string;
 }

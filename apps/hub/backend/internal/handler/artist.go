@@ -135,10 +135,6 @@ func (h *ArtistHandler) ListUserArtists(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list artists"})
 	}
 
-	if artists == nil {
-		artists = []model.Artist{}
-	}
-
 	return c.JSON(http.StatusOK, artists)
 }
 

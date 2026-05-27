@@ -11,11 +11,11 @@ func (q *Queries) UpsertArtist(ctx context.Context, mbArtistID, name, disambigua
 		INSERT INTO artists (mb_artist_id, name, disambiguation, status, active)
 		VALUES ($1, $2, $3, 'queued', true)
 		ON CONFLICT (mb_artist_id) DO UPDATE SET active = true
-		RETURNING mb_artist_id, name, disambiguation, image_url, description, release_group_count, status, active, created_at, synced_at`
+		RETURNING mb_artist_id, name, disambiguation, image_url, description, release_group_count, status, created_at, synced_at`
 
 	var a model.Artist
 	err := q.Pool.QueryRow(ctx, query, mbArtistID, name, disambiguation).Scan(
-		&a.MBArtistID, &a.Name, &a.Disambiguation, &a.ImageURL, &a.Description, &a.ReleaseGroupCount, &a.Status, &a.Active, &a.CreatedAt, &a.SyncedAt,
+		&a.MBArtistID, &a.Name, &a.Disambiguation, &a.ImageURL, &a.Description, &a.ReleaseGroupCount, &a.Status, &a.CreatedAt, &a.SyncedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (q *Queries) DeactivateArtist(ctx context.Context, mbArtistID string) error
 
 func (q *Queries) GetUserArtists(ctx context.Context, userID string) ([]model.Artist, error) {
 	query := `
-		SELECT a.mb_artist_id, a.name, a.disambiguation, a.image_url, a.description, a.release_group_count, a.status, a.active, a.created_at, a.synced_at
+		SELECT a.mb_artist_id, a.name, a.disambiguation, a.image_url, a.description, a.release_group_count, a.status, a.created_at, a.synced_at
 		FROM artists a
 		JOIN user_artists ua ON ua.mb_artist_id = a.mb_artist_id
 		WHERE ua.user_id = $1
@@ -60,14 +60,19 @@ func (q *Queries) GetUserArtists(ctx context.Context, userID string) ([]model.Ar
 	}
 	defer rows.Close()
 
-	var artists []model.Artist
+	artists := []model.Artist{}
 	for rows.Next() {
 		var a model.Artist
-		if err := rows.Scan(&a.MBArtistID, &a.Name, &a.Disambiguation, &a.ImageURL, &a.Description, &a.ReleaseGroupCount, &a.Status, &a.Active, &a.CreatedAt, &a.SyncedAt); err != nil {
+		if err := rows.Scan(&a.MBArtistID, &a.Name, &a.Disambiguation, &a.ImageURL, &a.Description, &a.ReleaseGroupCount, &a.Status, &a.CreatedAt, &a.SyncedAt); err != nil {
 			return nil, err
 		}
 		artists = append(artists, a)
 	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return artists, nil
 }
 
