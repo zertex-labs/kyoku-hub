@@ -134,8 +134,7 @@ func (w *Worker) SyncArtist(ctx context.Context, mbArtistID string) {
 	}
 
 	if imageURL == "" && fallbackRGID != "" {
-		// TODO: maybe front-250?
-		imageURL = fmt.Sprintf("https://coverartarchive.org/release-group/%s/front-500", fallbackRGID)
+		imageURL = fmt.Sprintf("https://coverartarchive.org/release-group/%s/front-250", fallbackRGID)
 	}
 
 	// 5. Upsert artist in DB
