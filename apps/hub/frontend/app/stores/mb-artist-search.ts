@@ -1,15 +1,24 @@
 import { required } from "@regle/rules";
 import { defineStore } from "pinia";
 import { useRegle } from "@regle/core";
-import { type IArtistMatch } from "musicbrainz-api";
+
+interface ArtistMatch {
+  id: string;
+  name: string;
+  disambiguation?: string;
+  score?: number;
+}
 
 const ARTIST_SEARCH_RESULTS_LIMIT = 10;
 
 export const useMBAristSearchStore = defineStore("mb-artist-search", () => {
-  const loadedArtists = shallowRef<IArtistMatch[]>([]);
+  const config = useRuntimeConfig();
+  const apiBase = config.public.apiBaseUrl as string;
+
+  const loadedArtists = shallowRef<ArtistMatch[]>([]);
   const hasMore = ref(false);
   const totalResults = ref(0);
-  const prefetchedNextPage = shallowRef<IArtistMatch[]>([]);
+  const prefetchedNextPage = shallowRef<ArtistMatch[]>([]);
 
   const { r$ } = useRegle(
     { artistName: "" },
@@ -27,12 +36,13 @@ export const useMBAristSearchStore = defineStore("mb-artist-search", () => {
     const artistName = r$.artistName.$value;
     r$.$reset();
 
-    const res = await $fetch("/api/artist/search", {
+    const res = await $fetch<{ artists: ArtistMatch[]; nextPage: ArtistMatch[]; total: number; hasMore: boolean }>(`${apiBase}/api/artist/search`, {
       query: {
         q: artistName,
         offset,
         limit: ARTIST_SEARCH_RESULTS_LIMIT,
       },
+      credentials: "include",
     });
 
     loadedArtists.value = [...loadedArtists.value, ...res.artists];
@@ -54,12 +64,13 @@ export const useMBAristSearchStore = defineStore("mb-artist-search", () => {
       // Prefetch the next page in the background
       if (hasMore.value) {
         const artistName = r$.artistName.$value;
-        $fetch("/api/artist/search", {
+        $fetch<{ artists: ArtistMatch[]; nextPage: ArtistMatch[]; total: number; hasMore: boolean }>(`${apiBase}/api/artist/search`, {
           query: {
             q: artistName,
             offset: newOffset,
             limit: ARTIST_SEARCH_RESULTS_LIMIT,
           },
+          credentials: "include",
         }).then((res) => {
           prefetchedNextPage.value = res.nextPage;
           hasMore.value = res.hasMore;

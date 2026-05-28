@@ -1,14 +1,12 @@
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
+  ssr: false,
+  spaLoadingTemplate: true,
 
   runtimeConfig: {
-    musicbrainzClientId: "",
-    musicbrainzClientSecret: "",
-    tokenEncryptionKey: "", // 32-byte hex key for AES-256-GCM
     public: {
-      baseUrl: "http://localhost:3000",
-      authMode: "oauth",
+      apiBaseUrl: "http://localhost:8080",
     },
   },
 
