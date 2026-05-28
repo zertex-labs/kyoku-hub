@@ -2,15 +2,7 @@
 definePageMeta({ layout: false, middleware: [] });
 
 const config = useRuntimeConfig();
-const authMode = config.public.authMode as string;
-
-const username = ref("");
-const authStore = useAuthStore();
-
-async function handleUsernameLogin() {
-  if (!username.value.trim()) return;
-  await authStore.loginWithUsername(username.value.trim());
-}
+const apiBase = config.public.apiBaseUrl as string;
 </script>
 
 <template>
@@ -35,40 +27,13 @@ async function handleUsernameLogin() {
 
       <!-- Login card -->
       <div class="bg-white/5 border border-white/10 rounded-xl p-6 backdrop-blur-sm">
-        <!-- OAuth mode -->
-        <template v-if="authMode === 'oauth'">
-          <a
-            href="/api/auth/authorize"
-            class="flex items-center justify-center gap-3 w-full py-3 px-4 bg-orange-500 hover:bg-orange-400 text-white font-medium rounded-lg transition-colors"
-          >
-            <Icon name="simple-icons:musicbrainz" class="text-xl" />
-            Login with MusicBrainz
-          </a>
-        </template>
-
-        <!-- No-auth mode (username only) -->
-        <template v-else>
-          <form @submit.prevent="handleUsernameLogin" class="flex flex-col gap-4">
-            <div>
-              <label for="username" class="block text-sm text-gray-400 mb-1.5">Username</label>
-              <input
-                id="username"
-                v-model="username"
-                type="text"
-                placeholder="Enter a username"
-                class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-orange-400/50 transition-colors"
-                autocomplete="username"
-              />
-            </div>
-            <button
-              type="submit"
-              :disabled="!username.trim()"
-              class="w-full py-3 px-4 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-            >
-              Enter
-            </button>
-          </form>
-        </template>
+        <a
+          :href="`${apiBase}/api/auth/authorize`"
+          class="flex items-center justify-center gap-3 w-full py-3 px-4 bg-orange-500 hover:bg-orange-400 text-white font-medium rounded-lg transition-colors"
+        >
+          <BrandIcon name="musicbrainz" class="text-xl size-8" />
+          Login with MusicBrainz
+        </a>
       </div>
     </div>
   </div>

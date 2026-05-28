@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: brainz-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: brainz
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data
+
+volumes:
+  brainz_data:
