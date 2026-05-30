@@ -2,10 +2,13 @@ module github.com/zertex-labs/kyoku-hub/apps/fs
 
 go 1.25.6
 
-require go.uber.org/zap v1.28.0
+require (
+	github.com/labstack/gommon v0.5.0
+	go.uber.org/zap v1.28.0
+)
 
 require (
-	github.com/labstack/gommon v0.5.0 // indirect
+	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
