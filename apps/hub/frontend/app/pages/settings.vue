@@ -1,0 +1,383 @@
+<script setup lang="ts">
+const authStore = useAuthStore();
+const agentStore = useAgentStore();
+const { agents } = storeToRefs(agentStore);
+
+const config = useRuntimeConfig();
+const apiBase = config.public.apiBaseUrl as string;
+
+const MAX_AGENTS = 3;
+
+type SectionId = "account" | "agents" 
+
+const sections: { id: SectionId; label: string; icon: string }[] = [
+  { id: "account", label: "Account", icon: "lucide:user" },
+  { id: "agents", label: "File System Agents", icon: "lucide:hard-drive" },
+];
+
+const route = useRoute();
+const router = useRouter();
+
+// Active section is driven by the URL hash so links like /settings#agents work.
+const active = ref<SectionId>(
+  (sections.find((s) => s.id === route.hash.slice(1))?.id as SectionId) ?? "account",
+);
+
+function selectSection(id: SectionId) {
+  active.value = id;
+  router.replace({ hash: `#${id}` });
+}
+
+// --- Agents ---
+const loadingAgents = ref(false);
+
+onMounted(async () => {
+  loadingAgents.value = true;
+  try {
+    await agentStore.fetchAgents();
+  } catch (e) {
+    console.error("Failed to load agents:", e);
+  } finally {
+    loadingAgents.value = false;
+  }
+});
+
+// Token generation flow
+const generatedToken = ref<string | null>(null);
+const generatingToken = ref(false);
+const copied = ref<"token" | "snippet" | null>(null);
+
+async function generateToken() {
+  if (generatingToken.value || agents.value.length >= MAX_AGENTS) return;
+  generatingToken.value = true;
+  copied.value = null;
+  try {
+    generatedToken.value = await agentStore.createToken();
+  } catch (e) {
+    console.error("Failed to create token:", e);
+  } finally {
+    generatingToken.value = false;
+  }
+}
+
+async function copy(text: string, which: "token" | "snippet") {
+  try {
+    await navigator.clipboard.writeText(text);
+    copied.value = which;
+    setTimeout(() => (copied.value = null), 2000);
+  } catch (e) {
+    console.error("Clipboard write failed:", e);
+  }
+}
+
+function dismissToken() {
+  generatedToken.value = null;
+  // Refresh in case the agent registered while the token was shown.
+  agentStore.fetchAgents().catch(() => {});
+}
+
+// Install method shown in the registration card.
+type Method = "docker" | "compose" | "manual";
+const methods: { id: Method; label: string }[] = [
+  { id: "docker", label: "Docker" },
+  { id: "compose", label: "Docker Compose" },
+  { id: "manual", label: "Manual" },
+];
+const method = ref<Method>("docker");
+
+const removing = ref<string | null>(null);
+
+async function removeAgent(id: string) {
+  if (removing.value) return;
+  removing.value = id;
+  try {
+    await agentStore.deleteAgent(id);
+  } catch (e) {
+    console.error("Failed to delete agent:", e);
+  } finally {
+    removing.value = null;
+  }
+}
+
+// WS/API URLs the fs agent should connect to (derived from the API base).
+const hubWsUrl = computed(() => apiBase.replace(/^http/, "ws") + "/ws/agent");
+const hubApiUrl = computed(() => apiBase + "/api");
+
+// Image is built from apps/fs/Dockerfile; replace with your published tag if you have one.
+const IMAGE = "ghcr.io/zertex-labs/kyoku-fs:latest";
+
+const snippet = computed(() => {
+  const token = generatedToken.value ?? "";
+  if (method.value === "docker") {
+    // --network host lets the agent reach a hub on the same Linux host via localhost.
+    return [
+      "docker run -d \\",
+      "  --name kyoku-fs \\",
+      "  --network host \\",
+      `  -e AGENT_TOKEN=${token} \\`,
+      '  -e AGENT_LABEL="My NAS" \\',
+      `  -e HUB_WS_URL=${hubWsUrl.value} \\`,
+      `  -e HUB_API_URL=${hubApiUrl.value} \\`,
+      "  -e SCAN_DIRS=/music \\",
+      "  -v /path/to/music:/music:ro \\",
+      "  -v kyoku-fs-data:/data \\",
+      `  ${IMAGE}`,
+    ].join("\n");
+  }
+  if (method.value === "compose") {
+    return [
+      "# from the repo root (apps/fs/docker-compose.yml)",
+      `AGENT_TOKEN=${token} \\`,
+      'AGENT_LABEL="My NAS" \\',
+      "MUSIC_DIR=/path/to/music \\",
+      "  docker compose -f apps/fs/docker-compose.yml up -d",
+    ].join("\n");
+  }
+  return [
+    `AGENT_TOKEN=${token}`,
+    'AGENT_LABEL="My NAS"',
+    `HUB_WS_URL=${hubWsUrl.value}`,
+    `HUB_API_URL=${hubApiUrl.value}`,
+    "SCAN_DIRS=/path/to/music",
+  ].join("\n");
+});
+
+// What actually lands on the clipboard — strip comment lines so users can paste
+// straight into a terminal without deleting anything.
+const copyableSnippet = computed(() =>
+  snippet.value
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("#"))
+    .join("\n"),
+);
+
+const methodHint = computed(() => {
+  if (method.value === "docker") return "Replace /path/to/music with the folder holding your library.";
+  if (method.value === "compose") return "Uses the bundled compose file; MUSIC_DIR is mounted read-only at /music.";
+  return "Set these in the agent's environment (or .env), then run the fs binary.";
+});
+
+function formatDate(date: string): string {
+  return new Date(date).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+</script>
+
+<template>
+  <div>
+    <h1 class="text-2xl font-bold text-white mb-6">Settings</h1>
+
+    <div class="flex flex-col md:flex-row gap-8">
+      <!-- Left: section nav -->
+      <nav class="md:w-56 shrink-0">
+        <ul class="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible">
+          <li v-for="s in sections" :key="s.id">
+            <button
+              class="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors"
+              :class="
+                active === s.id
+                  ? 'bg-white/[0.06] text-white'
+                  : 'text-gray-400 hover:text-white hover:bg-white/[0.03]'
+              "
+              @click="selectSection(s.id)"
+            >
+              <Icon :name="s.icon" class="w-4 h-4 shrink-0" />
+              {{ s.label }}
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      <!-- Right: content -->
+      <div class="flex-1 min-w-0 max-w-2xl">
+        <!-- Account -->
+        <section v-if="active === 'account'">
+          <h2 class="text-lg font-semibold text-white mb-1">Account</h2>
+          <p class="text-sm text-gray-500 mb-6">Your profile and sign-in details.</p>
+
+          <div class="rounded-xl border border-white/10 bg-white/[0.02] divide-y divide-white/5">
+            <div class="flex items-center justify-between px-5 py-4">
+              <div>
+                <p class="text-sm font-medium text-white">Username</p>
+                <p class="text-xs text-gray-500 mt-0.5">From your MusicBrainz account</p>
+              </div>
+              <span class="text-sm text-gray-300">{{ authStore.user?.username ?? "—" }}</span>
+            </div>
+            <div class="flex items-center justify-between px-5 py-4">
+              <div>
+                <p class="text-sm font-medium text-white">Sign in</p>
+                <p class="text-xs text-gray-500 mt-0.5">Authenticated via MusicBrainz OAuth</p>
+              </div>
+              <BrandIcon name="musicbrainz" class="w-5 h-5 text-gray-400" />
+            </div>
+          </div>
+
+          <div class="mt-6">
+            <button
+              class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-400 border border-red-400/20 rounded-lg hover:bg-red-400/10 transition-colors"
+              @click="authStore.logout()"
+            >
+              <Icon name="lucide:log-out" class="w-4 h-4" />
+              Log out
+            </button>
+          </div>
+        </section>
+
+        <!-- File System Agents -->
+        <section v-else-if="active === 'agents'">
+          <div class="flex items-start justify-between gap-4 mb-6">
+            <div>
+              <h2 class="text-lg font-semibold text-white mb-1">File System Agents</h2>
+              <p class="text-sm text-gray-500">
+                Agents run on your machine or NAS and expose your local music library to kyoku.
+                <span class="text-gray-600">({{ agents.length }}/{{ MAX_AGENTS }})</span>
+              </p>
+            </div>
+            <button
+              :disabled="generatingToken || agents.length >= MAX_AGENTS || !!generatedToken"
+              class="shrink-0 inline-flex items-center gap-2 px-3.5 py-2 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              @click="generateToken"
+            >
+              <Icon
+                :name="generatingToken ? 'lucide:loader-2' : 'lucide:plus'"
+                class="w-4 h-4"
+                :class="{ 'animate-spin': generatingToken }"
+              />
+              Add agent
+            </button>
+          </div>
+
+          <!-- Registration token card -->
+          <div
+            v-if="generatedToken"
+            class="mb-6 rounded-xl border border-orange-400/30 bg-orange-400/[0.04] p-5"
+          >
+            <div class="flex items-start justify-between gap-3 mb-3">
+              <div class="flex items-center gap-2">
+                <Icon name="lucide:key-round" class="w-4 h-4 text-orange-400" />
+                <h3 class="text-sm font-semibold text-white">Register a new agent</h3>
+              </div>
+              <button
+                class="text-gray-500 hover:text-white transition-colors"
+                title="Dismiss"
+                @click="dismissToken"
+              >
+                <Icon name="lucide:x" class="w-4 h-4" />
+              </button>
+            </div>
+
+            <p class="text-xs text-gray-400 mb-3">
+              This one-time token expires in 10 minutes. Start the fs agent using one of the methods
+              below, then it will register itself and appear here.
+            </p>
+
+            <!-- Token -->
+            <div class="flex items-center gap-2 mb-4">
+              <code
+                class="flex-1 min-w-0 truncate text-xs text-orange-300 bg-black/30 border border-white/10 rounded-md px-3 py-2 font-mono"
+              >
+                {{ generatedToken }}
+              </code>
+              <button
+                class="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-300 border border-white/10 rounded-md hover:bg-white/5 transition-colors"
+                @click="copy(generatedToken!, 'token')"
+              >
+                <Icon :name="copied === 'token' ? 'lucide:check' : 'lucide:copy'" class="w-3.5 h-3.5" />
+                {{ copied === "token" ? "Copied" : "Copy" }}
+              </button>
+            </div>
+
+            <!-- Method tabs -->
+            <div class="flex items-center gap-1 mb-2">
+              <button
+                v-for="m in methods"
+                :key="m.id"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
+                :class="
+                  method === m.id
+                    ? 'bg-white/10 text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                "
+                @click="method = m.id"
+              >
+                {{ m.label }}
+                <span
+                  v-if="m.id === 'docker'"
+                  class="text-[10px] font-normal text-orange-400/80"
+                >recommended</span>
+              </button>
+            </div>
+
+            <!-- Command snippet -->
+            <div class="relative">
+              <button
+                class="absolute top-2 right-2 inline-flex items-center gap-1.5 px-2 py-1 text-[11px] font-medium text-gray-300 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 transition-colors"
+                @click="copy(copyableSnippet, 'snippet')"
+              >
+                <Icon :name="copied === 'snippet' ? 'lucide:check' : 'lucide:copy'" class="w-3 h-3" />
+                {{ copied === "snippet" ? "Copied" : "Copy" }}
+              </button>
+              <pre
+                class="text-[11px] leading-relaxed text-gray-300 bg-black/30 border border-white/10 rounded-md px-3 py-2.5 pr-20 overflow-x-auto font-mono"
+              >{{ snippet }}</pre>
+            </div>
+            <p class="text-[11px] text-gray-500 mt-2">{{ methodHint }}</p>
+          </div>
+
+          <!-- Agent list -->
+          <div v-if="loadingAgents" class="text-sm text-gray-500">Loading agents…</div>
+
+          <div
+            v-else-if="agents.length"
+            class="rounded-xl border border-white/10 overflow-hidden divide-y divide-white/5"
+          >
+            <div
+              v-for="agent in agents"
+              :key="agent.id"
+              class="group flex items-center gap-3 px-5 py-4 bg-white/[0.02]"
+            >
+              <div class="w-9 h-9 shrink-0 rounded-lg bg-white/5 flex items-center justify-center">
+                <Icon name="lucide:hard-drive" class="w-4 h-4 text-gray-400" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-white truncate">
+                  {{ agent.label || "Unnamed agent" }}
+                </p>
+                <p class="text-xs text-gray-500 mt-0.5">
+                  Added {{ formatDate(agent.created_at) }} · <span class="font-mono">{{ agent.id }}</span>
+                </p>
+              </div>
+              <button
+                :disabled="removing === agent.id"
+                class="shrink-0 p-1.5 text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-400 disabled:opacity-100 transition-all"
+                title="Remove agent"
+                @click="removeAgent(agent.id)"
+              >
+                <Icon
+                  :name="removing === agent.id ? 'lucide:loader-2' : 'lucide:trash-2'"
+                  class="w-4 h-4"
+                  :class="{ 'animate-spin': removing === agent.id }"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Empty state -->
+          <div
+            v-else-if="!generatedToken"
+            class="rounded-xl border border-dashed border-white/10 px-5 py-10 text-center"
+          >
+            <Icon name="lucide:hard-drive" class="w-8 h-8 text-gray-700 mx-auto mb-3" />
+            <p class="text-sm text-gray-400">No agents registered yet.</p>
+            <p class="text-xs text-gray-600 mt-1">
+              Add one to connect your local music library.
+            </p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</template>

@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package fs.v1;
+
+option go_package = "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1";
+
+// Envelope wraps all messages sent over the Hub <-> Fs WS connection.
+// Each message has exactly one payload field set.
+message Envelope {
+  oneof payload {
+    // Auth handshake (hub -> fs)
+    Challenge challenge = 1;
+    AuthResult auth_result = 2;
+
+    // Auth handshake (fs -> hub)
+    ChallengeResponse challenge_response = 3;
+  }
+}
+
+// Hub -> Fs: challenge with random nonce for keypair auth
+message Challenge {
+  bytes nonce = 1; // 32-byte random nonce
+}
+
+// Fs -> Hub: signed nonce proving identity
+message ChallengeResponse {
+  bytes signature = 1; // ed25519 signature of the nonce
+}
+
+// Hub -> Fs: result of the auth handshake
+message AuthResult {
+  bool success = 1;
+  string error = 2;
+}

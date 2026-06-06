@@ -15,6 +15,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
@@ -113,6 +114,14 @@ func main() {
 
 	artistHandler := handler.NewArtistHandler(cfg, q, bc, brainzAPI, log)
 	artistHandler.Register(e.Group("/api/artist"))
+
+	// Fs agent management (REST endpoints)
+	agentHandler := handler.NewAgentHandler(q)
+	agentHandler.Register(e.Group("/api/agent"))
+
+	// Fs agent WS endpoint (challenge-response auth, no session needed)
+	agentManager := fsagent.NewManager(q, log)
+	e.GET("/ws/agent", agentManager.HandleWS)
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
 	if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {

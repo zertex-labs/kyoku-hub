@@ -9,13 +9,26 @@ import (
 )
 
 type Config struct {
-		Port  string
-		ScanDirs []string
+	Port     string
+	ScanDirs []string
+
+	// Hub connection
+	HubWSURL  string // ws://hub:8080/ws/agent
+	HubAPIURL string // http://hub:8080/api
+
+	// Agent identity (persisted to DATA_DIR/agent.json)
+	DataDir string
+
+	// Registration (only needed for first-time setup)
+	AgentToken string // one-time registration token from hub
+	AgentLabel string // user-friendly label (e.g. "NAS Agent")
 }
 
 func Load() (*Config, error) {
 	required := []string{
 		"SCAN_DIRS",
+		"HUB_WS_URL",
+		"HUB_API_URL",
 	}
 	for _, key := range required {
 		if os.Getenv(key) == "" {
@@ -24,8 +37,13 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port: getEnv("PORT", "8000"),
-		ScanDirs: ParseScanDirs(getEnv("SCAN_DIRS", "")),
+		Port:       getEnv("PORT", "8000"),
+		ScanDirs:   ParseScanDirs(getEnv("SCAN_DIRS", "")),
+		HubWSURL:   os.Getenv("HUB_WS_URL"),
+		HubAPIURL:  os.Getenv("HUB_API_URL"),
+		DataDir:    getEnv("DATA_DIR", "./data"),
+		AgentToken: os.Getenv("AGENT_TOKEN"),
+		AgentLabel: getEnv("AGENT_LABEL", ""),
 	}
 
 	if len(cfg.ScanDirs) == 0 {
@@ -55,4 +73,3 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
-

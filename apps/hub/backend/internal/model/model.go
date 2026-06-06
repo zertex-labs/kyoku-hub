@@ -16,6 +16,14 @@ type Session struct {
 	CreatedAt time.Time `json:"-"`
 }
 
+type FsAgent struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"-"`
+	Label     string    `json:"label"`
+	PublicKey string    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Artist struct {
 	MBArtistID        string     `json:"mb_artist_id"`
 	Name              string     `json:"name"`
