@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,6 +60,14 @@ type FsHandler struct {
 	cfg    *config.Config
 }
 
+type UnsupportedFileExtensionError struct {
+	Ext string
+}
+
+func (err *UnsupportedFileExtensionError) Error() string {
+	return fmt.Sprintf("unsupported extension: %s", err.Ext)
+}
+
 var SupportedFileExtensions = map[string]bool{
 	".mp3":  true,
 	".flac": true,
@@ -104,9 +113,11 @@ func (h *FsHandler) ScanDirs(dirs []string) (FileDataMap, error) {
 
 			ext := filepath.Ext(path)
 			if !SupportedFileExtensions[strings.ToLower(ext)] {
-				// TODO: error
-				return nil
+				h.logger.Error("got invalid file extension: " + ext)
+				return &UnsupportedFileExtensionError{Ext: ext}
 			}
+
+			// TODO: Cache
 
 			if record[dir] == nil {
 				record[dir] = make([]FileData, 0)
@@ -206,8 +217,8 @@ func getMusicBrainzTags(format tag.Format, raw map[string]interface{}) MusicBrai
 
 	if format == tag.VORBIS {
 		// Vorbis Comments (FLAC, OGG) — uppercase, underscore-separated
-		mbTrackID = getRawTag(raw, "MUSICBRAINZ_RELEASETRACKID") 
-		mbRecordingID = getRawTag(raw, "MUSICBRAINZ_TRACKID")   
+		mbTrackID = getRawTag(raw, "MUSICBRAINZ_RELEASETRACKID")
+		mbRecordingID = getRawTag(raw, "MUSICBRAINZ_TRACKID")
 		mbReleaseID = getRawTag(raw, "MUSICBRAINZ_ALBUMID")
 		mbReleaseGroupID = getRawTag(raw, "MUSICBRAINZ_RELEASEGROUPID")
 		mbArtistID = getRawTag(raw, "MUSICBRAINZ_ARTISTID")
