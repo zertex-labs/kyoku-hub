@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17
-    container_name: brainz-postgres
+    container_name: kyoku-brainz-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
