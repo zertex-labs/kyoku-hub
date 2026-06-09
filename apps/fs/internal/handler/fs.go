@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,14 +58,6 @@ type FsHandler struct {
 	logger *zap.Logger
 	cfg    *config.Config
 	cache  *fsCache
-}
-
-type UnsupportedFileExtensionError struct {
-	Ext string
-}
-
-func (err *UnsupportedFileExtensionError) Error() string {
-	return fmt.Sprintf("unsupported extension: %s", err.Ext)
 }
 
 var SupportedFileExtensions = map[string]bool{
@@ -142,8 +133,8 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 			ext := filepath.Ext(path)
 			if !SupportedFileExtensions[strings.ToLower(ext)] {
-				h.logger.Error("got invalid file extension: " + ext)
-				return &UnsupportedFileExtensionError{Ext: ext}
+				h.logger.Debug("skipping unsupported file", zap.String("ext", ext), zap.String("path", path))
+				return nil
 			}
 
 			parentDir := filepath.Dir(path)
@@ -186,7 +177,7 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 func (h *FsHandler) CompleteMetadata(dir string, base BaseFileData) (FileData, error) {
 	filePath := strings.Join([]string{dir, base.RelativePath}, "/")
-	h.logger.Info("completing path " + filePath)
+	h.logger.Debug("completing path " + filePath)
 
 	f, err := os.OpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {

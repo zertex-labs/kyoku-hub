@@ -17,7 +17,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/logger"
+	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 )
@@ -25,7 +25,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	log := logger.New()
+	log := logger.New("hub")
 	defer log.Sync()
 
 	cfg, err := config.Load()

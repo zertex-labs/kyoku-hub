@@ -13,14 +13,14 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/handler"
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/hubclient"
-	logger "github.com/zertex-labs/kyoku-hub/apps/fs/internal/logger"
+	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/fs/internal/middleware"
 )
 
 func main() {
 	_ = godotenv.Load()
 
-	log := logger.New()
+	log := logger.New("fs")
 	defer log.Sync()
 
 	cfg, err := config.Load()
