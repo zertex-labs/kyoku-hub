@@ -61,6 +61,23 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_user_artists_artist ON user_artists(mb_artist_id);
+
+	CREATE TABLE IF NOT EXISTS agent_tokens (
+		token_hash TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		expires_at TIMESTAMPTZ NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE TABLE IF NOT EXISTS fs_agents (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		label TEXT NOT NULL DEFAULT '',
+		public_key TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_fs_agents_user_id ON fs_agents(user_id);
 	`
 
 	_, err := pool.Exec(ctx, schema)

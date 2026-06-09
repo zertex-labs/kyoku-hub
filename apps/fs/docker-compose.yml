@@ -1,0 +1,22 @@
+services:
+  fs:
+    build:
+      context: ../../
+      dockerfile: apps/fs/Dockerfile
+    # Host networking so the agent can reach a hub running on the same Linux host
+    # via localhost. On native Linux the docker bridge -> host path is commonly
+    # dropped by the host firewall; host mode sidesteps it. On Docker Desktop
+    # (mac/win) use bridge networking with host.docker.internal instead.
+    network_mode: host
+    environment:
+      SCAN_DIRS: /music
+      HUB_WS_URL: ws://localhost:8080/ws/agent
+      HUB_API_URL: http://localhost:8080/api
+      DATA_DIR: /data
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+      AGENT_LABEL: ${AGENT_LABEL:-}
+      PORT: "8000"
+    volumes:
+      - ./data:/data
+      # MUSIC_DIR points directly at your music library (mounted read-only).
+      - ${MUSIC_DIR:-./music}:/music:ro
