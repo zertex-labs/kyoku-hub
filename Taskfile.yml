@@ -63,7 +63,7 @@ tasks:
     desc: Start all deps then run hub, brainz, and frontend concurrently
     deps: [deps]
     cmds:
-      - bash -c 'cleanup() { kill 0; task deps:down; }; trap cleanup INT TERM EXIT; (cd apps/hub/backend && go run ./cmd/server/main.go) & (cd apps/brainz && go run ./cmd/server/main.go) & (cd apps/hub/frontend && bun run dev) & wait'
+      - bash -c 'cleanup() { kill 0; task deps:down; }; trap cleanup INT TERM EXIT; (cd apps/hub/backend && go run ./cmd/server/main.go) & (cd apps/brainz && go run ./cmd/server/main.go) & (cd apps/fs && go run ./cmd/server/main.go) & (cd apps/hub/frontend && bun run dev) & wait'
 
   # ── Proto generation ──────────────────────────────────────────────────────────
 
