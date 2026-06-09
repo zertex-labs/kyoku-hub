@@ -58,6 +58,7 @@ type FileDataMap = map[string][]FileData
 type FsHandler struct {
 	logger *zap.Logger
 	cfg    *config.Config
+	cache  *fsCache
 }
 
 type UnsupportedFileExtensionError struct {
@@ -81,7 +82,16 @@ var SupportedFileExtensions = map[string]bool{
 }
 
 func NewFsHandler(logger *zap.Logger, cfg *config.Config) *FsHandler {
-	return &FsHandler{logger: logger, cfg: cfg}
+	h := &FsHandler{logger: logger, cfg: cfg}
+
+	cache, err := newFsCache(cfg.DataDir)
+	if err != nil {
+		logger.Warn("scan cache unavailable, running without cache", zap.Error(err))
+	} else {
+		h.cache = cache
+	}
+
+	return h
 }
 
 func (h *FsHandler) RegisterRoutes(g *echo.Group) {
@@ -89,7 +99,9 @@ func (h *FsHandler) RegisterRoutes(g *echo.Group) {
 }
 
 func (h *FsHandler) GetData(c echo.Context) error {
-	dirs, err := h.ScanDirs(h.cfg.ScanDirs)
+	fullQueryParam := c.QueryParam("full")
+	full := fullQueryParam == "1" || fullQueryParam == "true"
+	dirs, err := h.ScanDirs(h.cfg.ScanDirs, full)
 
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse dirs"})
@@ -98,9 +110,14 @@ func (h *FsHandler) GetData(c echo.Context) error {
 	return c.JSON(http.StatusOK, dirs)
 }
 
-func (h *FsHandler) ScanDirs(dirs []string) (FileDataMap, error) {
+func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 	record := make(FileDataMap, len(dirs))
 	for _, dir := range dirs {
+		record[dir] = make([]FileData, 0)
+
+		// cachedDirs maps directory path -> preloaded file data (nil = dirty, must rescan)
+		cachedDirs := make(map[string]map[string]FileData)
+
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				h.logger.Error("got error from walk")
@@ -108,6 +125,18 @@ func (h *FsHandler) ScanDirs(dirs []string) (FileDataMap, error) {
 			}
 
 			if info.IsDir() {
+				if h.cache != nil {
+					mtime := info.ModTime().UnixNano()
+					if !full {
+						if cached, ok := h.cache.getFolderMtime(path); ok && cached == mtime {
+							cachedDirs[path] = h.cache.getFilesInDir(path)
+							return nil
+						}
+					}
+					h.cache.invalidateDir(path)
+					h.cache.setFolderMtime(path, mtime)
+					cachedDirs[path] = nil
+				}
 				return nil
 			}
 
@@ -117,12 +146,14 @@ func (h *FsHandler) ScanDirs(dirs []string) (FileDataMap, error) {
 				return &UnsupportedFileExtensionError{Ext: ext}
 			}
 
-			// TODO: Cache
-
-			if record[dir] == nil {
-				record[dir] = make([]FileData, 0)
+			parentDir := filepath.Dir(path)
+			if dirFiles, ok := cachedDirs[parentDir]; ok && dirFiles != nil {
+				if cached, hit := dirFiles[path]; hit {
+					record[dir] = append(record[dir], cached)
+					return nil
+				}
 			}
-			rdata := record[dir]
+
 			relativePath, err := filepath.Rel(dir, path)
 			if err != nil {
 				log.Error("failed to get relative path for " + path)
@@ -136,8 +167,12 @@ func (h *FsHandler) ScanDirs(dirs []string) (FileDataMap, error) {
 				log.Error("failed to complete metadata for " + path)
 				return err
 			}
-			record[dir] = append(rdata, filedata)
 
+			if h.cache != nil {
+				h.cache.setFile(path, parentDir, filedata)
+			}
+
+			record[dir] = append(record[dir], filedata)
 			return nil
 		})
 
