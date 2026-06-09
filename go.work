@@ -3,6 +3,7 @@ go 1.25.6
 use (
 	./apps/brainz
 	./apps/hub/backend
+  ./apps/fs
 	./packages/musicbrainz-client
 	./proto/gen
 )
