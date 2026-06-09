@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
+    container_name: kyoku-hub-postgres
     environment:
       POSTGRES_USER: kyoku
       POSTGRES_PASSWORD: kyoku
