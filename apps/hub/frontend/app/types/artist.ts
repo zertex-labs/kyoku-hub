@@ -20,7 +20,7 @@ export interface TrackedArtist {
   image_url?: string;
   description: string;
   release_group_count: number;
-  status: string;
+  status: "synced" | "queued";
   created_at: string;
   synced_at?: string;
 }

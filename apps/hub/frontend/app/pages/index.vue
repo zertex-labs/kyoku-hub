@@ -205,13 +205,18 @@ async function removeArtist(mbArtistId: string) {
           v-for="artist in filteredArtists"
           :key="artist.mb_artist_id"
           :to="`/artist/${artist.mb_artist_id}`"
-          class="group flex items-center gap-3 bg-white/[0.03] px-3 py-2 hover:bg-white/[0.06] transition-colors"
+          :data-is-queued="artist.status === 'queued'"
+          class="data-[is-queued=true]:pointer-events-none data-[is-queued=true]:opacity-50 group flex items-center gap-3 bg-white/[0.03] px-3 py-2 hover:bg-white/[0.06] transition-colors"
         >
           <!-- Name + disambiguation + links -->
           <div class="flex items-center gap-2 truncate flex-1">
             <p class="text-sm font-medium text-white truncate">
               {{ artist.name }}
-              <span v-if="artist.disambiguation && artist.disambiguation !== artist.name" class="text-gray-500 font-normal text-xs">({{ artist.disambiguation }})</span>
+              <span
+                v-if="artist.disambiguation && artist.disambiguation !== artist.name"
+                class="text-gray-500 font-normal text-xs"
+                >({{ artist.disambiguation }})</span
+              >
             </p>
             <a
               :href="`https://musicbrainz.org/artist/${artist.mb_artist_id}`"
@@ -233,23 +238,30 @@ async function removeArtist(mbArtistId: string) {
 
           <!-- Release groups -->
           <template v-if="artist.status === 'synced'">
-            <span class="text-[11px] text-orange-400 font-semibold">{{ Math.round(artist.release_group_count * 0.75) }}/{{ artist.release_group_count }}</span>
+            <span class="text-[11px] text-orange-400 font-semibold">
+              {{ Math.round(artist.release_group_count * 0.75) }}/{{ artist.release_group_count }}
+            </span>
             <div class="w-16 h-1 rounded-full bg-white/10 overflow-hidden">
               <div class="h-full rounded-full bg-orange-500" style="width: 75%" />
             </div>
           </template>
-          <span v-else class="text-[11px] text-gray-500 italic">syncing...</span>
+          <span v-else class="text-[11px] text-gray-500 italic">queued</span>
 
           <!-- Last synced -->
-          <span class="text-[11px] text-blue-400 w-14 text-right" title="Last synced">{{ artist.synced_at ? timeAgo(artist.synced_at) : '—' }}</span>
+          <span class="text-[11px] text-blue-400 w-14 text-right" title="Last synced">
+            {{ artist.synced_at ? timeAgo(artist.synced_at) : "—" }}
+          </span>
 
           <!-- Date added -->
-          <span class="text-[11px] text-gray-500 w-14 text-right" title="Date added">{{ timeAgo(artist.created_at) }}</span>
+          <span class="text-[11px] text-gray-500 w-14 text-right" title="Date added">
+            {{ timeAgo(artist.created_at) }}
+          </span>
 
           <!-- Request button -->
           <button
             class="p-0.5 text-gray-600 hover:text-orange-400 transition-colors"
             title="Request sync"
+            @click.stop="console.log"
           >
             <Icon name="lucide:refresh-cw" class="w-3 h-3" />
           </button>
@@ -266,11 +278,7 @@ async function removeArtist(mbArtistId: string) {
               name="lucide:clock"
               class="w-3.5 h-3.5 text-yellow-500"
             />
-            <Icon
-              v-else
-              name="lucide:loader-2"
-              class="w-3.5 h-3.5 text-blue-400 animate-spin"
-            />
+            <Icon v-else name="lucide:loader-2" class="w-3.5 h-3.5 text-blue-400 animate-spin" />
           </div>
 
           <!-- Remove button -->
@@ -285,7 +293,11 @@ async function removeArtist(mbArtistId: string) {
 
       <!-- Empty state -->
       <p v-else class="text-gray-500 text-sm">
-        {{ nameFilter.trim() ? 'No matches. Try a different filter or add a new artist.' : 'No artists yet. Add one to get started.' }}
+        {{
+          nameFilter.trim()
+            ? "No matches. Try a different filter or add a new artist."
+            : "No artists yet. Add one to get started."
+        }}
       </p>
     </aside>
 

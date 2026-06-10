@@ -22,11 +22,11 @@ import (
 )
 
 const (
-	challengeSize    = 32
-	authTimeout      = 10 * time.Second
-	writeWait        = 10 * time.Second
-	pongWait         = 60 * time.Second
-	pingPeriod       = (pongWait * 9) / 10
+	challengeSize = 32
+	authTimeout   = 10 * time.Second
+	writeWait     = 10 * time.Second
+	pongWait      = 60 * time.Second
+	pingPeriod    = (pongWait * 9) / 10
 )
 
 var upgrader = websocket.Upgrader{
@@ -54,7 +54,7 @@ func (c *Conn) sendProto(msg *fspb.Envelope) error {
 
 // Manager tracks connected fs agent connections per user.
 type Manager struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// userID -> agentID -> *Conn
 	conns      map[string]map[string]*Conn
 	queries    *queries.Queries

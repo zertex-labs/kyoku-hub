@@ -9,6 +9,7 @@ const MAX_DESCRIPTION_LENGTH = 350;
 const coverErrors = ref<Set<string>>(new Set());
 const coverLoaded = ref<Set<string>>(new Set());
 
+
 function onCoverLoad(rgId: string) {
   coverLoaded.value = new Set([...coverLoaded.value, rgId]);
 }
@@ -104,8 +105,7 @@ function handleArtistUpdated(data: any) {
   refreshReleaseGroups();
 }
 
-function handleFsSynced(data: any) {
-  fsStore.applySync(data);
+function handleFsSynced() {
   refreshReleaseGroups();
 }
 
