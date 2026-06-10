@@ -10,17 +10,12 @@ function connect(apiBase: string) {
     withCredentials: true,
   });
 
-  eventSource.addEventListener("artist:status", (e) => {
-    dispatch("artist:status", JSON.parse(e.data));
-  });
-
-  eventSource.addEventListener("artist:updated", (e) => {
-    dispatch("artist:updated", JSON.parse(e.data));
-  });
-
-  eventSource.addEventListener("artist:failed", (e) => {
-    dispatch("artist:failed", JSON.parse(e.data));
-  });
+  const knownEvents = ["artist:status", "artist:updated", "artist:failed", "fs:synced"];
+  for (const event of knownEvents) {
+    eventSource.addEventListener(event, (e) => {
+      dispatch(event, JSON.parse((e as MessageEvent).data));
+    });
+  }
 
   eventSource.onerror = () => {
     // EventSource auto-reconnects, nothing to do

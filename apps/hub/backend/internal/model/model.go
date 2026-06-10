@@ -24,6 +24,15 @@ type FsAgent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type ReleaseGroupState string
+
+const (
+	RGStatePerfect ReleaseGroupState = "PERFECT"
+	RGStateMBMiss  ReleaseGroupState = "MB_MISS"
+	RGStateBad     ReleaseGroupState = "BAD"
+	RGStateMissing ReleaseGroupState = "MISSING"
+)
+
 type Artist struct {
 	MBArtistID        string     `json:"mb_artist_id"`
 	Name              string     `json:"name"`

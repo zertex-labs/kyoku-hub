@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/handler"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
@@ -26,17 +27,19 @@ type Client struct {
 	url        string
 	agentID    string
 	privateKey ed25519.PrivateKey
+	fsHandler  *handler.FsHandler
 	logger     *zap.Logger
 
 	conn *websocket.Conn
 	mu   sync.Mutex
 }
 
-func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, logger *zap.Logger) *Client {
+func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, fsHandler *handler.FsHandler, logger *zap.Logger) *Client {
 	return &Client{
 		url:        hubWSURL,
 		agentID:    agentID,
 		privateKey: privateKey,
+		fsHandler:  fsHandler,
 		logger:     logger,
 	}
 }
@@ -187,8 +190,48 @@ func (c *Client) readLoop(ctx context.Context) {
 }
 
 func (c *Client) handleMessage(ctx context.Context, env *fspb.Envelope) {
-	// Future: handle scan requests, etc.
-	c.logger.Debug("received message from hub (no handlers yet)")
+	switch p := env.Payload.(type) {
+	case *fspb.Envelope_SyncRequest:
+		go c.handleSyncRequest(p.SyncRequest)
+	default:
+		c.logger.Debug("received unhandled message from hub")
+	}
+}
+
+func (c *Client) handleSyncRequest(req *fspb.SyncRequest) {
+	c.logger.Info("received sync request", zap.Bool("full", req.Full))
+
+	dirs, err := c.fsHandler.ScanDirs(c.fsHandler.ScanDirsConfig(), req.Full)
+	if err != nil {
+		c.logger.Error("scan failed", zap.Error(err))
+		return
+	}
+
+	var tracks []*fspb.TrackEntry
+	for _, files := range dirs {
+		for _, f := range files {
+			tracks = append(tracks, &fspb.TrackEntry{
+				Rpath:                      f.RelativePath,
+				Title:                      f.MusicTags.Title,
+				Album:                      f.MusicTags.Album,
+				Artist:                     f.MusicTags.Artist,
+				Year:                       int32(f.MusicTags.Year),
+				TrackNum:                   int32(f.MusicTags.TrackNum),
+				MusicbrainzReleaseGroupId:  f.MusicTags.MusicBrainzReleaseGroupID,
+				MusicbrainzArtistId:        f.MusicTags.MusicBrainzArtistID,
+			})
+		}
+	}
+
+	if err := c.send(&fspb.Envelope{
+		Payload: &fspb.Envelope_ScanResult{
+			ScanResult: &fspb.ScanResult{Tracks: tracks},
+		},
+	}); err != nil {
+		c.logger.Error("failed to send scan result", zap.Error(err))
+	}
+
+	c.logger.Info("scan result sent", zap.Int("tracks", len(tracks)))
 }
 
 func (c *Client) send(msg *fspb.Envelope) error {

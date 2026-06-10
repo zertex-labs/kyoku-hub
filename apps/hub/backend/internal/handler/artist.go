@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"regexp"
 
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
@@ -49,7 +51,7 @@ func (h *ArtistHandler) SearchForArtist(c echo.Context) error {
 	limit := c.QueryParam("limit")
 	offset := c.QueryParam("offset")
 
-	path := "/artist/search?q=" + query
+	path := "/artist/search?q=" + url.QueryEscape(query)
 	if limit != "" {
 		path += "&limit=" + limit
 	}
@@ -184,5 +186,31 @@ func (h *ArtistHandler) GetArtistReleaseGroups(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "brainz unavailable"})
 	}
 
-	return c.JSONBlob(status, body)
+	if status != http.StatusOK {
+		return c.JSONBlob(status, body)
+	}
+
+	user := c.Get("user").(*model.User)
+	states, err := h.queries.GetUserReleaseGroupStates(c.Request().Context(), user.ID)
+	if err != nil {
+		h.logger.Error("failed to fetch rg states", zap.Error(err))
+		// Non-fatal: return without states
+		return c.JSONBlob(status, body)
+	}
+
+	var rgs []map[string]interface{}
+	if err := json.Unmarshal(body, &rgs); err != nil {
+		return c.JSONBlob(status, body)
+	}
+
+	for i, rg := range rgs {
+		rgID, _ := rg["mb_release_group_id"].(string)
+		if s, ok := states[rgID]; ok {
+			rgs[i]["fs_state"] = s
+		} else {
+			rgs[i]["fs_state"] = string(model.RGStateMissing)
+		}
+	}
+
+	return c.JSON(http.StatusOK, rgs)
 }

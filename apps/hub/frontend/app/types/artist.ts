@@ -38,6 +38,8 @@ export interface BrainzArtist {
   created_at: string;
 }
 
+export type ReleaseGroupFsState = "PERFECT" | "MB_MISS" | "BAD" | "MISSING";
+
 export interface ReleaseGroup {
   mb_release_group_id: string;
   title: string;
@@ -45,4 +47,5 @@ export interface ReleaseGroup {
   secondary_types: string;
   disambiguation: string;
   first_release_date: string;
+  fs_state?: ReleaseGroupFsState;
 }

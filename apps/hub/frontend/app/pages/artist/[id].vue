@@ -79,26 +79,42 @@ const sortedTypes = computed(() =>
   }),
 );
 
+// FS issues modal
+const fsStore = useFsStore();
+const badModalRg = ref<ReleaseGroup | null>(null);
+const badModalIssues = computed(() =>
+  badModalRg.value ? fsStore.getIssues(badModalRg.value.mb_release_group_id) : [],
+);
+
+function openBadModal(rg: ReleaseGroup) {
+  badModalRg.value = rg;
+}
+
 // SSE: real-time updates for this artist
 const { on, off } = useSSE();
 
 function handleArtistUpdated(data: any) {
   if (data.mb_artist_id !== id) return;
-  // Update artist info in-place
   if (artist.value) {
     artist.value.name = data.name;
     artist.value.disambiguation = data.disambiguation;
     artist.value.image_url = data.image_url;
     artist.value.description = data.description;
   }
-  // Refetch release groups from backend
+  refreshReleaseGroups();
+}
+
+function handleFsSynced(data: any) {
+  fsStore.applySync(data);
   refreshReleaseGroups();
 }
 
 on("artist:updated", handleArtistUpdated);
+on("fs:synced", handleFsSynced);
 
 onUnmounted(() => {
   off("artist:updated", handleArtistUpdated);
+  off("fs:synced", handleFsSynced);
 });
 </script>
 
@@ -212,9 +228,26 @@ onUnmounted(() => {
             <!-- Info -->
             <div class="p-2.5">
               <p class="text-xs font-medium text-white truncate">{{ rg.title }}</p>
-              <p class="text-[11px] text-gray-500 mt-0.5">
-                {{ rg.first_release_date?.slice(0, 4) || "—" }}
-              </p>
+              <div class="flex items-center justify-between mt-0.5">
+                <p class="text-[11px] text-gray-500">
+                  {{ rg.first_release_date?.slice(0, 4) || "—" }}
+                </p>
+                <component
+                  :is="rg.fs_state === 'BAD' ? 'button' : 'span'"
+                  v-if="rg.fs_state"
+                  class="text-[10px] font-semibold px-1 py-0.5 rounded"
+                  :class="{
+                    'bg-green-500/20 text-green-400': rg.fs_state === 'PERFECT',
+                    'bg-yellow-500/20 text-yellow-400': rg.fs_state === 'MB_MISS',
+                    'bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer': rg.fs_state === 'BAD',
+                    'bg-white/5 text-gray-600': rg.fs_state === 'MISSING',
+                  }"
+                  :title="rg.fs_state"
+                  @click.prevent="rg.fs_state === 'BAD' && openBadModal(rg)"
+                >
+                  {{ rg.fs_state === 'PERFECT' ? '✓' : rg.fs_state === 'MB_MISS' ? 'MB?' : rg.fs_state === 'BAD' ? '!' : '–' }}
+                </component>
+              </div>
             </div>
           </div>
         </div>
@@ -258,6 +291,54 @@ onUnmounted(() => {
               <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line max-h-[200px]">
                 {{ description }}
               </p>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- BAD Tags Modal -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-150 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition duration-100 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="badModalRg" class="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="badModalRg = null" />
+          <div
+            class="relative w-full max-w-xl max-h-[80vh] bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl flex flex-col"
+          >
+            <div class="flex items-center justify-between px-5 py-4 border-b border-white/5 shrink-0">
+              <div>
+                <h2 class="text-sm font-semibold text-white">Tag Issues</h2>
+                <p class="text-xs text-gray-500 mt-0.5">{{ badModalRg.title }}</p>
+              </div>
+              <button @click="badModalRg = null" class="text-gray-500 hover:text-white transition-colors">
+                <Icon name="lucide:x" class="w-5 h-5" />
+              </button>
+            </div>
+            <div class="overflow-y-auto flex-1 min-h-0">
+              <div v-if="badModalIssues.length === 0" class="p-5 text-sm text-gray-500">
+                No issue details available. Run sync to see tag problems.
+              </div>
+              <div v-else class="divide-y divide-white/5">
+                <div v-for="issue in badModalIssues" :key="issue.rpath" class="px-5 py-3">
+                  <p class="text-xs text-gray-300 truncate font-mono mb-1.5">{{ issue.rpath }}</p>
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="tag in issue.missing"
+                      :key="tag"
+                      class="text-[11px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 font-medium"
+                    >
+                      {{ tag }}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

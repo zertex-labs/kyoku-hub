@@ -13,7 +13,7 @@ type Artist struct {
 	Country        string    `json:"country"`
 	ImageURL       string    `json:"image_url"`
 	Description    string    `json:"description"`
-	LastFetchedAt  time.Time `json:"last_fetched_at"`
+	LastFetchedAt  *time.Time `json:"last_fetched_at,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 

@@ -14,6 +14,22 @@ const searching = ref(false);
 const loadingMore = ref(false);
 const adding = ref(false);
 const nameFilter = ref("");
+const syncing = ref(false);
+
+async function triggerSync() {
+  if (syncing.value) return;
+  syncing.value = true;
+  try {
+    await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/fs/sync`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch (e) {
+    console.error("Sync failed:", e);
+  } finally {
+    syncing.value = false;
+  }
+}
 
 // SSE: real-time artist updates
 const { on, off } = useSSE();
@@ -153,7 +169,7 @@ async function removeArtist(mbArtistId: string) {
 
     <!-- Artists -->
     <aside class="w-full lg:w-[45%] shrink-0">
-      <!-- Header: title + filter + add -->
+      <!-- Header: title + filter + sync + add -->
       <div class="flex items-center gap-2 mb-4">
         <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Artists</h2>
         <div class="flex-1" />
@@ -163,6 +179,14 @@ async function removeArtist(mbArtistId: string) {
           placeholder="Filter..."
           class="w-24 h-7 bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-400/50 transition-colors"
         />
+        <button
+          @click="triggerSync"
+          :disabled="syncing"
+          class="w-7 h-7 flex items-center justify-center rounded-md border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="Sync library"
+        >
+          <Icon name="lucide:refresh-cw" class="w-3.5 h-3.5" :class="{ 'animate-spin': syncing }" />
+        </button>
         <button
           @click="openModal"
           class="w-7 h-7 flex items-center justify-center rounded-md border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 hover:text-white transition-colors"

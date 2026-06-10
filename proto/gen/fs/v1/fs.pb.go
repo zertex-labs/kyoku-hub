@@ -30,6 +30,8 @@ type Envelope struct {
 	//	*Envelope_Challenge
 	//	*Envelope_AuthResult
 	//	*Envelope_ChallengeResponse
+	//	*Envelope_SyncRequest
+	//	*Envelope_ScanResult
 	Payload       isEnvelope_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -99,6 +101,24 @@ func (x *Envelope) GetChallengeResponse() *ChallengeResponse {
 	return nil
 }
 
+func (x *Envelope) GetSyncRequest() *SyncRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_SyncRequest); ok {
+			return x.SyncRequest
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetScanResult() *ScanResult {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_ScanResult); ok {
+			return x.ScanResult
+		}
+	}
+	return nil
+}
+
 type isEnvelope_Payload interface {
 	isEnvelope_Payload()
 }
@@ -117,11 +137,25 @@ type Envelope_ChallengeResponse struct {
 	ChallengeResponse *ChallengeResponse `protobuf:"bytes,3,opt,name=challenge_response,json=challengeResponse,proto3,oneof"`
 }
 
+type Envelope_SyncRequest struct {
+	// Sync (hub -> fs)
+	SyncRequest *SyncRequest `protobuf:"bytes,4,opt,name=sync_request,json=syncRequest,proto3,oneof"`
+}
+
+type Envelope_ScanResult struct {
+	// Sync (fs -> hub)
+	ScanResult *ScanResult `protobuf:"bytes,5,opt,name=scan_result,json=scanResult,proto3,oneof"`
+}
+
 func (*Envelope_Challenge) isEnvelope_Payload() {}
 
 func (*Envelope_AuthResult) isEnvelope_Payload() {}
 
 func (*Envelope_ChallengeResponse) isEnvelope_Payload() {}
+
+func (*Envelope_SyncRequest) isEnvelope_Payload() {}
+
+func (*Envelope_ScanResult) isEnvelope_Payload() {}
 
 // Hub -> Fs: challenge with random nonce for keypair auth
 type Challenge struct {
@@ -266,16 +300,210 @@ func (x *AuthResult) GetError() string {
 	return ""
 }
 
+// Hub -> Fs: trigger a library scan
+type SyncRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Full          bool                   `protobuf:"varint,1,opt,name=full,proto3" json:"full,omitempty"` // if true, bypass cache and do a full rescan
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SyncRequest) Reset() {
+	*x = SyncRequest{}
+	mi := &file_fs_v1_fs_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SyncRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SyncRequest) ProtoMessage() {}
+
+func (x *SyncRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
+func (*SyncRequest) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SyncRequest) GetFull() bool {
+	if x != nil {
+		return x.Full
+	}
+	return false
+}
+
+// A single track's metadata from the fs scan
+type TrackEntry struct {
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	Rpath                     string                 `protobuf:"bytes,1,opt,name=rpath,proto3" json:"rpath,omitempty"`
+	Title                     string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Album                     string                 `protobuf:"bytes,3,opt,name=album,proto3" json:"album,omitempty"`
+	Artist                    string                 `protobuf:"bytes,4,opt,name=artist,proto3" json:"artist,omitempty"`
+	Year                      int32                  `protobuf:"varint,5,opt,name=year,proto3" json:"year,omitempty"`
+	TrackNum                  int32                  `protobuf:"varint,6,opt,name=track_num,json=trackNum,proto3" json:"track_num,omitempty"`
+	MusicbrainzReleaseGroupId string                 `protobuf:"bytes,7,opt,name=musicbrainz_release_group_id,json=musicbrainzReleaseGroupId,proto3" json:"musicbrainz_release_group_id,omitempty"`
+	MusicbrainzArtistId       string                 `protobuf:"bytes,8,opt,name=musicbrainz_artist_id,json=musicbrainzArtistId,proto3" json:"musicbrainz_artist_id,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *TrackEntry) Reset() {
+	*x = TrackEntry{}
+	mi := &file_fs_v1_fs_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrackEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrackEntry) ProtoMessage() {}
+
+func (x *TrackEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrackEntry.ProtoReflect.Descriptor instead.
+func (*TrackEntry) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TrackEntry) GetRpath() string {
+	if x != nil {
+		return x.Rpath
+	}
+	return ""
+}
+
+func (x *TrackEntry) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *TrackEntry) GetAlbum() string {
+	if x != nil {
+		return x.Album
+	}
+	return ""
+}
+
+func (x *TrackEntry) GetArtist() string {
+	if x != nil {
+		return x.Artist
+	}
+	return ""
+}
+
+func (x *TrackEntry) GetYear() int32 {
+	if x != nil {
+		return x.Year
+	}
+	return 0
+}
+
+func (x *TrackEntry) GetTrackNum() int32 {
+	if x != nil {
+		return x.TrackNum
+	}
+	return 0
+}
+
+func (x *TrackEntry) GetMusicbrainzReleaseGroupId() string {
+	if x != nil {
+		return x.MusicbrainzReleaseGroupId
+	}
+	return ""
+}
+
+func (x *TrackEntry) GetMusicbrainzArtistId() string {
+	if x != nil {
+		return x.MusicbrainzArtistId
+	}
+	return ""
+}
+
+// Fs -> Hub: scan results
+type ScanResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tracks        []*TrackEntry          `protobuf:"bytes,1,rep,name=tracks,proto3" json:"tracks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanResult) Reset() {
+	*x = ScanResult{}
+	mi := &file_fs_v1_fs_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanResult) ProtoMessage() {}
+
+func (x *ScanResult) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanResult.ProtoReflect.Descriptor instead.
+func (*ScanResult) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ScanResult) GetTracks() []*TrackEntry {
+	if x != nil {
+		return x.Tracks
+	}
+	return nil
+}
+
 var File_fs_v1_fs_proto protoreflect.FileDescriptor
 
 const file_fs_v1_fs_proto_rawDesc = "" +
 	"\n" +
-	"\x0efs/v1/fs.proto\x12\x05fs.v1\"\xc8\x01\n" +
+	"\x0efs/v1/fs.proto\x12\x05fs.v1\"\xb7\x02\n" +
 	"\bEnvelope\x120\n" +
 	"\tchallenge\x18\x01 \x01(\v2\x10.fs.v1.ChallengeH\x00R\tchallenge\x124\n" +
 	"\vauth_result\x18\x02 \x01(\v2\x11.fs.v1.AuthResultH\x00R\n" +
 	"authResult\x12I\n" +
-	"\x12challenge_response\x18\x03 \x01(\v2\x18.fs.v1.ChallengeResponseH\x00R\x11challengeResponseB\t\n" +
+	"\x12challenge_response\x18\x03 \x01(\v2\x18.fs.v1.ChallengeResponseH\x00R\x11challengeResponse\x127\n" +
+	"\fsync_request\x18\x04 \x01(\v2\x12.fs.v1.SyncRequestH\x00R\vsyncRequest\x124\n" +
+	"\vscan_result\x18\x05 \x01(\v2\x11.fs.v1.ScanResultH\x00R\n" +
+	"scanResultB\t\n" +
 	"\apayload\"!\n" +
 	"\tChallenge\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\"1\n" +
@@ -284,7 +512,22 @@ const file_fs_v1_fs_proto_rawDesc = "" +
 	"\n" +
 	"AuthResult\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05errorB2Z0github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1b\x06proto3"
+	"\x05error\x18\x02 \x01(\tR\x05error\"!\n" +
+	"\vSyncRequest\x12\x12\n" +
+	"\x04full\x18\x01 \x01(\bR\x04full\"\x8c\x02\n" +
+	"\n" +
+	"TrackEntry\x12\x14\n" +
+	"\x05rpath\x18\x01 \x01(\tR\x05rpath\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
+	"\x05album\x18\x03 \x01(\tR\x05album\x12\x16\n" +
+	"\x06artist\x18\x04 \x01(\tR\x06artist\x12\x12\n" +
+	"\x04year\x18\x05 \x01(\x05R\x04year\x12\x1b\n" +
+	"\ttrack_num\x18\x06 \x01(\x05R\btrackNum\x12?\n" +
+	"\x1cmusicbrainz_release_group_id\x18\a \x01(\tR\x19musicbrainzReleaseGroupId\x122\n" +
+	"\x15musicbrainz_artist_id\x18\b \x01(\tR\x13musicbrainzArtistId\"7\n" +
+	"\n" +
+	"ScanResult\x12)\n" +
+	"\x06tracks\x18\x01 \x03(\v2\x11.fs.v1.TrackEntryR\x06tracksB2Z0github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1b\x06proto3"
 
 var (
 	file_fs_v1_fs_proto_rawDescOnce sync.Once
@@ -298,22 +541,28 @@ func file_fs_v1_fs_proto_rawDescGZIP() []byte {
 	return file_fs_v1_fs_proto_rawDescData
 }
 
-var file_fs_v1_fs_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_fs_v1_fs_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_fs_v1_fs_proto_goTypes = []any{
 	(*Envelope)(nil),          // 0: fs.v1.Envelope
 	(*Challenge)(nil),         // 1: fs.v1.Challenge
 	(*ChallengeResponse)(nil), // 2: fs.v1.ChallengeResponse
 	(*AuthResult)(nil),        // 3: fs.v1.AuthResult
+	(*SyncRequest)(nil),       // 4: fs.v1.SyncRequest
+	(*TrackEntry)(nil),        // 5: fs.v1.TrackEntry
+	(*ScanResult)(nil),        // 6: fs.v1.ScanResult
 }
 var file_fs_v1_fs_proto_depIdxs = []int32{
 	1, // 0: fs.v1.Envelope.challenge:type_name -> fs.v1.Challenge
 	3, // 1: fs.v1.Envelope.auth_result:type_name -> fs.v1.AuthResult
 	2, // 2: fs.v1.Envelope.challenge_response:type_name -> fs.v1.ChallengeResponse
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: fs.v1.Envelope.sync_request:type_name -> fs.v1.SyncRequest
+	6, // 4: fs.v1.Envelope.scan_result:type_name -> fs.v1.ScanResult
+	5, // 5: fs.v1.ScanResult.tracks:type_name -> fs.v1.TrackEntry
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_fs_v1_fs_proto_init() }
@@ -325,6 +574,8 @@ func file_fs_v1_fs_proto_init() {
 		(*Envelope_Challenge)(nil),
 		(*Envelope_AuthResult)(nil),
 		(*Envelope_ChallengeResponse)(nil),
+		(*Envelope_SyncRequest)(nil),
+		(*Envelope_ScanResult)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -332,7 +583,7 @@ func file_fs_v1_fs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fs_v1_fs_proto_rawDesc), len(file_fs_v1_fs_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

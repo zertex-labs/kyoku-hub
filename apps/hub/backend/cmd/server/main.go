@@ -120,8 +120,12 @@ func main() {
 	agentHandler.Register(e.Group("/api/agent"))
 
 	// Fs agent WS endpoint (challenge-response auth, no session needed)
-	agentManager := fsagent.NewManager(q, log)
+	agentManager := fsagent.NewManager(q, sseManager, log)
 	e.GET("/ws/agent", agentManager.HandleWS)
+
+	// Fs sync endpoint
+	fsSyncHandler := handler.NewFsSyncHandler(q, agentManager)
+	fsSyncHandler.Register(e.Group("/api/fs"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
 	if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {

@@ -85,6 +85,10 @@ func NewFsHandler(logger *zap.Logger, cfg *config.Config) *FsHandler {
 	return h
 }
 
+func (h *FsHandler) ScanDirsConfig() []string {
+	return h.cfg.ScanDirs
+}
+
 func (h *FsHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/data", h.GetData)
 }
@@ -218,6 +222,7 @@ func (h *FsHandler) CompleteMetadata(dir string, base BaseFileData) (FileData, e
 func getRawTag(raw map[string]interface{}, keys ...string) string {
 	for _, key := range keys {
 		// Try variations of the key to account for different taggers
+		// TODO: maybe normalize key so we're not doing extra loops
 		variations := []string{key, strings.ToLower(key), strings.ToUpper(key)}
 
 		for _, vKey := range variations {

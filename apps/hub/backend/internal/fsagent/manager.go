@@ -1,6 +1,7 @@
 package fsagent
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -15,6 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
@@ -53,16 +56,18 @@ func (c *Conn) sendProto(msg *fspb.Envelope) error {
 type Manager struct {
 	mu      sync.RWMutex
 	// userID -> agentID -> *Conn
-	conns   map[string]map[string]*Conn
-	queries *queries.Queries
-	logger  *zap.Logger
+	conns      map[string]map[string]*Conn
+	queries    *queries.Queries
+	sseManager *sse.Manager
+	logger     *zap.Logger
 }
 
-func NewManager(q *queries.Queries, logger *zap.Logger) *Manager {
+func NewManager(q *queries.Queries, sseManager *sse.Manager, logger *zap.Logger) *Manager {
 	return &Manager{
-		conns:   make(map[string]map[string]*Conn),
-		queries: q,
-		logger:  logger,
+		conns:      make(map[string]map[string]*Conn),
+		queries:    q,
+		sseManager: sseManager,
+		logger:     logger,
 	}
 }
 
@@ -247,9 +252,99 @@ func (m *Manager) readLoop(conn *Conn) {
 }
 
 func (m *Manager) handleMessage(conn *Conn, env *fspb.Envelope) {
-	// Future: handle scan results, file metadata, etc.
-	m.logger.Debug("received message from fs agent (no handlers yet)",
+	switch p := env.Payload.(type) {
+	case *fspb.Envelope_ScanResult:
+		m.processScanResult(conn, p.ScanResult)
+	default:
+		m.logger.Debug("received unhandled message from fs agent",
+			zap.String("agent_id", conn.AgentID),
+		)
+	}
+}
+
+type trackIssue struct {
+	Rpath   string   `json:"rpath"`
+	Missing []string `json:"missing"`
+}
+
+func missingTags(t *fspb.TrackEntry) []string {
+	var missing []string
+	if t.Title == "" {
+		missing = append(missing, "title")
+	}
+	if t.Album == "" {
+		missing = append(missing, "album")
+	}
+	if t.Artist == "" {
+		missing = append(missing, "artist")
+	}
+	if t.Year == 0 {
+		missing = append(missing, "year")
+	}
+	if t.TrackNum == 0 {
+		missing = append(missing, "track_num")
+	}
+	return missing
+}
+
+func (m *Manager) processScanResult(conn *Conn, result *fspb.ScanResult) {
+	ctx := context.Background()
+	userID := conn.UserID
+
+	type rgGroup struct {
+		perfect bool
+		issues  []trackIssue
+	}
+	groups := make(map[string]*rgGroup)
+
+	for _, t := range result.Tracks {
+		if t.MusicbrainzReleaseGroupId == "" {
+			continue
+		}
+		rg, ok := groups[t.MusicbrainzReleaseGroupId]
+		if !ok {
+			rg = &rgGroup{perfect: true}
+			groups[t.MusicbrainzReleaseGroupId] = rg
+		}
+		if missing := missingTags(t); len(missing) > 0 {
+			rg.perfect = false
+			rg.issues = append(rg.issues, trackIssue{Rpath: t.Rpath, Missing: missing})
+		}
+	}
+
+	states := make(map[string]string, len(groups))
+	issues := make(map[string][]trackIssue)
+	for rgID, rg := range groups {
+		if rg.perfect {
+			states[rgID] = string(model.RGStatePerfect)
+		} else {
+			states[rgID] = string(model.RGStateBad)
+			issues[rgID] = rg.issues
+		}
+	}
+
+	if len(states) == 0 {
+		return
+	}
+
+	if err := m.queries.UpsertReleaseGroupStates(ctx, userID, states); err != nil {
+		m.logger.Error("failed to upsert release group states",
+			zap.String("agent_id", conn.AgentID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	m.sseManager.Broadcast("fs:synced", map[string]interface{}{
+		"user_id": userID,
+		"states":  states,
+		"issues":  issues,
+	})
+
+	m.logger.Info("processed scan result",
 		zap.String("agent_id", conn.AgentID),
+		zap.Int("tracks", len(result.Tracks)),
+		zap.Int("release_groups", len(states)),
 	)
 }
 
@@ -266,4 +361,26 @@ func (m *Manager) GetUserConns(userID string) []*Conn {
 		conns = append(conns, c)
 	}
 	return conns
+}
+
+// RequestSync sends a SyncRequest to all active agents for the given user.
+// Returns the number of agents that received the request.
+func (m *Manager) RequestSync(userID string, full bool) int {
+	conns := m.GetUserConns(userID)
+	sent := 0
+	for _, c := range conns {
+		if err := c.sendProto(&fspb.Envelope{
+			Payload: &fspb.Envelope_SyncRequest{
+				SyncRequest: &fspb.SyncRequest{Full: full},
+			},
+		}); err != nil {
+			m.logger.Warn("failed to send sync request",
+				zap.String("agent_id", c.AgentID),
+				zap.Error(err),
+			)
+			continue
+		}
+		sent++
+	}
+	return sent
 }
