@@ -29,6 +29,34 @@ tasks:
       - docker compose -f apps/hub/backend/docker-compose.yml down
       - docker compose -f apps/brainz/docker-compose.yml down
 
+  # ── Data resets (pgdata dirs are root-owned bind mounts, so rm runs in docker) ─
+
+  deps:reset:hub:
+    desc: Stop hub postgres and delete its data (orphans registered fs agents)
+    cmds:
+      - docker compose -f apps/hub/backend/docker-compose.yml down
+      - docker run --rm -v "{{.ROOT_DIR}}/apps/hub/backend/data:/wipe" alpine rm -rf /wipe/pgdata
+
+  deps:reset:brainz:
+    desc: Stop brainz postgres and delete its data
+    cmds:
+      - docker compose -f apps/brainz/docker-compose.yml down
+      - docker run --rm -v "{{.ROOT_DIR}}/apps/brainz/data:/wipe" alpine rm -rf /wipe/pgdata
+
+  fs:reset:
+    desc: Delete fs agent identity + scan cache (agent needs a new AGENT_TOKEN)
+    cmds:
+      - docker compose -f apps/fs/docker-compose.yml down
+      - docker run --rm -v "{{.ROOT_DIR}}/apps/fs/data:/wipe" alpine sh -c 'rm -rf /wipe/* /wipe/.[!.]*'
+
+  deps:reset:
+    desc: Stop everything and wipe ALL local data (hub + brainz postgres, fs agent identity)
+    prompt: This permanently deletes hub/brainz postgres data and the fs agent identity. Continue?
+    cmds:
+      - task: deps:reset:hub
+      - task: deps:reset:brainz
+      - task: fs:reset
+
   # ── Individual dev servers ────────────────────────────────────────────────────
 
   dev:hub:

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 )
 
@@ -17,6 +18,8 @@ func NewEventsHandler(manager *sse.Manager) *EventsHandler {
 }
 
 func (h *EventsHandler) Stream(c echo.Context) error {
+	user := c.Get("user").(*model.User)
+
 	w := c.Response()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -28,7 +31,7 @@ func (h *EventsHandler) Stream(c echo.Context) error {
 	fmt.Fprint(w, "event: connected\ndata: {}\n\n")
 	w.Flush()
 
-	client := h.manager.Register()
+	client := h.manager.Register(user.ID)
 	defer h.manager.Unregister(client)
 
 	ctx := c.Request().Context()

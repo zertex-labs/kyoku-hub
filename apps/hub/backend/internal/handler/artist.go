@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
-	"regexp"
 
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 
@@ -14,23 +13,24 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/brainzclient"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
+	"github.com/zertex-labs/kyoku-hub/packages/validation"
 )
-
-var mbidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 const maxAddsPerHour = 20
 
 type ArtistHandler struct {
-	cfg       *config.Config
-	queries   *queries.Queries
-	bc        *brainzclient.Client
-	brainzAPI *brainzclient.API
-	logger    *zap.Logger
+	cfg          *config.Config
+	queries      *queries.Queries
+	bc           *brainzclient.Client
+	brainzAPI    *brainzclient.API
+	agentManager *fsagent.Manager
+	logger       *zap.Logger
 }
 
-func NewArtistHandler(cfg *config.Config, q *queries.Queries, bc *brainzclient.Client, brainzAPI *brainzclient.API, logger *zap.Logger) *ArtistHandler {
-	return &ArtistHandler{cfg: cfg, queries: q, bc: bc, brainzAPI: brainzAPI, logger: logger}
+func NewArtistHandler(cfg *config.Config, q *queries.Queries, bc *brainzclient.Client, brainzAPI *brainzclient.API, am *fsagent.Manager, logger *zap.Logger) *ArtistHandler {
+	return &ArtistHandler{cfg: cfg, queries: q, bc: bc, brainzAPI: brainzAPI, agentManager: am, logger: logger}
 }
 
 func (h *ArtistHandler) Register(g *echo.Group) {
@@ -80,7 +80,7 @@ func (h *ArtistHandler) AddArtistForUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing mbid or name"})
 	}
 
-	if !mbidRegex.MatchString(body.MBID) {
+	if !validation.IsMBID(body.MBID) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
 	}
 
@@ -121,7 +121,7 @@ func (h *ArtistHandler) RemoveArtistForUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing mbid"})
 	}
 
-	if !mbidRegex.MatchString(body.MBID) {
+	if !validation.IsMBID(body.MBID) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
 	}
 
@@ -161,7 +161,7 @@ func (h *ArtistHandler) ListUserArtists(c echo.Context) error {
 
 func (h *ArtistHandler) GetArtistDetail(c echo.Context) error {
 	id := c.Param("id")
-	if !mbidRegex.MatchString(id) {
+	if !validation.IsMBID(id) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
 	}
 
@@ -176,7 +176,7 @@ func (h *ArtistHandler) GetArtistDetail(c echo.Context) error {
 
 func (h *ArtistHandler) GetArtistReleaseGroups(c echo.Context) error {
 	id := c.Param("id")
-	if !mbidRegex.MatchString(id) {
+	if !validation.IsMBID(id) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid mbid format"})
 	}
 
@@ -203,10 +203,25 @@ func (h *ArtistHandler) GetArtistReleaseGroups(c echo.Context) error {
 		return c.JSONBlob(status, body)
 	}
 
+	// Artist name is needed to match untagged files (no MB IDs) against
+	// release groups by name. Failure is non-fatal: matching is skipped.
+	artistName, err := h.queries.GetArtistName(c.Request().Context(), id)
+	if err != nil {
+		artistName = ""
+	}
+
 	for i, rg := range rgs {
 		rgID, _ := rg["mb_release_group_id"].(string)
 		if s, ok := states[rgID]; ok {
 			rgs[i]["fs_state"] = s
+			continue
+		}
+
+		// Unknown to fs by MBID. If an untagged file matches by artist +
+		// title, the user likely has it but the files lack MusicBrainz tags.
+		title, _ := rg["title"].(string)
+		if artistName != "" && h.agentManager.HasUntaggedMatch(user.ID, artistName, title) {
+			rgs[i]["fs_state"] = string(model.RGStateMBMiss)
 		} else {
 			rgs[i]["fs_state"] = string(model.RGStateMissing)
 		}

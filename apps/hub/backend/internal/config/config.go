@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/zertex-labs/kyoku-hub/packages/validation"
 )
 
 type Config struct {
@@ -11,13 +13,14 @@ type Config struct {
 	DatabaseURL             string
 	MusicBrainzClientID     string
 	MusicBrainzClientSecret string
-	BaseURL                 string // Backend base URL (for OAuth redirect)
-	FrontendURL             string // Frontend URL (for CORS + post-login redirect)
+	BaseURL                 string   // Backend base URL (for OAuth redirect)
+	FrontendURL             string   // Frontend URL (for CORS + post-login redirect)
 	SessionSecret           string
-	BrainzWSURL             string // Brainz WS endpoint URL
-	BrainzAPIURL            string // Brainz HTTP API base URL
-	InstanceID              string // This hub's unique instance ID
-	SecureCookies           bool   // Whether to set Secure flag on cookies (derived from BaseURL)
+	BrainzWSURL             string   // Brainz WS endpoint URL
+	BrainzAPIURL            string   // Brainz HTTP API base URL
+	InstanceID              string   // This hub's unique instance ID
+	SecureCookies           bool     // Whether to set Secure flag on cookies (derived from BaseURL)
+	RequiredTags            []string // Tags an fs track must have to be considered complete
 }
 
 func Load() (*Config, error) {
@@ -35,6 +38,12 @@ func Load() (*Config, error) {
 	}
 
 	cfg.SecureCookies = strings.HasPrefix(cfg.BaseURL, "https://")
+
+	requiredTags, err := validation.ParseRequiredTags(os.Getenv("REQUIRED_TAGS"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid REQUIRED_TAGS: %w", err)
+	}
+	cfg.RequiredTags = requiredTags
 
 	required := []string{
 		"DATABASE_URL",

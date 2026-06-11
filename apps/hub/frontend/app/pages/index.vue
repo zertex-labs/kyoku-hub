@@ -31,8 +31,21 @@ async function triggerSync() {
   }
 }
 
+// Untagged files (scanned by fs agents but lacking MusicBrainz IDs)
+const fsStore = useFsStore();
+const { untagged } = storeToRefs(fsStore);
+const showUntagged = ref(false);
+
+if (import.meta.client) {
+  fsStore.fetchUntagged().catch((e) => console.error("Failed to fetch untagged files:", e));
+}
+
 // SSE: real-time artist updates
 const { on, off } = useSSE();
+
+function handleFsSynced() {
+  fsStore.fetchUntagged().catch(() => {});
+}
 
 function handleArtistStatus(data: { mb_artist_id: string; status: string }) {
   const artist = trackedArtists.value.find((a) => a.mb_artist_id === data.mb_artist_id);
@@ -65,11 +78,13 @@ function handleArtistFailed(data: { mb_artist_id: string }) {
 on("artist:status", handleArtistStatus);
 on("artist:updated", handleArtistUpdated);
 on("artist:failed", handleArtistFailed);
+on("fs:synced", handleFsSynced);
 
 onUnmounted(() => {
   off("artist:status", handleArtistStatus);
   off("artist:updated", handleArtistUpdated);
   off("artist:failed", handleArtistFailed);
+  off("fs:synced", handleFsSynced);
 });
 
 const filteredArtists = computed(() => {
@@ -299,6 +314,46 @@ async function removeArtist(mbArtistId: string) {
             : "No artists yet. Add one to get started."
         }}
       </p>
+
+      <!-- Untagged files -->
+      <div
+        v-if="untagged.length"
+        class="mt-4 rounded-lg border border-yellow-500/20 bg-yellow-500/[0.03] overflow-hidden"
+      >
+        <button
+          class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-yellow-500/[0.04] transition-colors"
+          @click="showUntagged = !showUntagged"
+        >
+          <Icon name="lucide:file-question" class="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+          <span class="text-xs font-medium text-yellow-400">
+            {{ untagged.length }} untagged file{{ untagged.length === 1 ? "" : "s" }}
+          </span>
+          <span class="text-[11px] text-gray-500 truncate">missing MusicBrainz tags</span>
+          <div class="flex-1" />
+          <Icon
+            :name="showUntagged ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+            class="w-3.5 h-3.5 text-gray-500 shrink-0"
+          />
+        </button>
+        <div
+          v-if="showUntagged"
+          class="max-h-56 overflow-y-auto divide-y divide-white/5 border-t border-white/5"
+        >
+          <div
+            v-for="t in untagged"
+            :key="`${t.agent_id}:${t.rpath}`"
+            class="px-3 py-2"
+          >
+            <p class="text-[11px] text-gray-300 font-mono truncate" :title="t.rpath">{{ t.rpath }}</p>
+            <p v-if="t.artist || t.album" class="text-[11px] text-gray-500 truncate mt-0.5">
+              {{ [t.artist, t.album].filter(Boolean).join(" — ") }}
+            </p>
+          </div>
+          <p class="px-3 py-2 text-[11px] text-gray-600">
+            Tag these files with MusicBrainz Picard so kyoku can match them to release groups.
+          </p>
+        </div>
+      </div>
     </aside>
 
     <!-- Add Artist Modal -->

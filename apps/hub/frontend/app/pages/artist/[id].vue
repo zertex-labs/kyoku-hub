@@ -80,15 +80,23 @@ const sortedTypes = computed(() =>
   }),
 );
 
-// FS issues modal
+// FS issues modal (issue details are fetched on demand when opened)
 const fsStore = useFsStore();
 const badModalRg = ref<ReleaseGroup | null>(null);
-const badModalIssues = computed(() =>
-  badModalRg.value ? fsStore.getIssues(badModalRg.value.mb_release_group_id) : [],
-);
+const badModalIssues = ref<TrackIssue[]>([]);
+const loadingIssues = ref(false);
 
-function openBadModal(rg: ReleaseGroup) {
+async function openBadModal(rg: ReleaseGroup) {
   badModalRg.value = rg;
+  badModalIssues.value = [];
+  loadingIssues.value = true;
+  try {
+    badModalIssues.value = await fsStore.fetchIssues(rg.mb_release_group_id);
+  } catch (e) {
+    console.error("Failed to fetch tag issues:", e);
+  } finally {
+    loadingIssues.value = false;
+  }
 }
 
 // SSE: real-time updates for this artist
@@ -322,8 +330,12 @@ onUnmounted(() => {
               </button>
             </div>
             <div class="overflow-y-auto flex-1 min-h-0">
-              <div v-if="badModalIssues.length === 0" class="p-5 text-sm text-gray-500">
-                No issue details available. Run sync to see tag problems.
+              <div v-if="loadingIssues" class="p-5 flex items-center gap-2 text-sm text-gray-500">
+                <Icon name="lucide:loader-2" class="w-4 h-4 animate-spin" />
+                Loading issues…
+              </div>
+              <div v-else-if="badModalIssues.length === 0" class="p-5 text-sm text-gray-500">
+                No issue details available. The agent may be offline — try running a sync.
               </div>
               <div v-else class="divide-y divide-white/5">
                 <div v-for="issue in badModalIssues" :key="issue.rpath" class="px-5 py-3">

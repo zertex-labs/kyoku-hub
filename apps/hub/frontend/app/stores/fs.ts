@@ -1,21 +1,27 @@
-export type TrackIssue = {
-  rpath: string;
-  missing: string[];
-};
-
 export const useFsStore = defineStore("fs", () => {
-  // rgId -> list of tracks with issues
-  const issues = ref<Record<string, TrackIssue[]>>({});
+  const config = useRuntimeConfig();
+  const apiBase = config.public.apiBaseUrl as string;
 
-  function applySync(data: { states?: Record<string, string>; issues?: Record<string, TrackIssue[]> }) {
-    if (data.issues) {
-      Object.assign(issues.value, data.issues);
-    }
+  const untagged = ref<UntaggedTrack[]>([]);
+  const untaggedLoaded = ref(false);
+
+  /** Fetch per-track tag issues for a release group on demand. */
+  async function fetchIssues(rgId: string): Promise<TrackIssue[]> {
+    const res = await $fetch<TrackIssue[]>(`${apiBase}/api/fs/issues`, {
+      params: { rg: rgId },
+      credentials: "include",
+    });
+    return res ?? [];
   }
 
-  function getIssues(rgId: string): TrackIssue[] {
-    return issues.value[rgId] ?? [];
+  /** Fetch all scanned files lacking MusicBrainz IDs. */
+  async function fetchUntagged() {
+    const res = await $fetch<UntaggedTrack[]>(`${apiBase}/api/fs/untagged`, {
+      credentials: "include",
+    });
+    untagged.value = res ?? [];
+    untaggedLoaded.value = true;
   }
 
-  return { issues, applySync, getIssues };
+  return { untagged, untaggedLoaded, fetchIssues, fetchUntagged };
 });

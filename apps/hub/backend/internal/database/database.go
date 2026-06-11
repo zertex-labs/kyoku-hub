@@ -74,20 +74,22 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		label TEXT NOT NULL DEFAULT '',
 		public_key TEXT NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		last_seen_at TIMESTAMPTZ
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_fs_agents_user_id ON fs_agents(user_id);
 
-	CREATE TABLE IF NOT EXISTS user_release_group_states (
+	CREATE TABLE IF NOT EXISTS fs_release_group_states (
 		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		agent_id TEXT NOT NULL REFERENCES fs_agents(id) ON DELETE CASCADE,
 		mb_release_group_id TEXT NOT NULL,
 		state TEXT NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		PRIMARY KEY (user_id, mb_release_group_id)
+		PRIMARY KEY (user_id, agent_id, mb_release_group_id)
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_urgs_user_id ON user_release_group_states(user_id);
+	CREATE INDEX IF NOT EXISTS idx_frgs_user_id ON fs_release_group_states(user_id);
 	`
 
 	_, err := pool.Exec(ctx, schema)

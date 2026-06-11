@@ -18,6 +18,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
+	"github.com/zertex-labs/kyoku-hub/packages/validation"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
@@ -56,18 +57,22 @@ func (c *Conn) sendProto(msg *fspb.Envelope) error {
 type Manager struct {
 	mu sync.RWMutex
 	// userID -> agentID -> *Conn
-	conns      map[string]map[string]*Conn
-	queries    *queries.Queries
-	sseManager *sse.Manager
-	logger     *zap.Logger
+	conns        map[string]map[string]*Conn
+	queries      *queries.Queries
+	sseManager   *sse.Manager
+	state        *stateStore
+	requiredTags []string
+	logger       *zap.Logger
 }
 
-func NewManager(q *queries.Queries, sseManager *sse.Manager, logger *zap.Logger) *Manager {
+func NewManager(q *queries.Queries, sseManager *sse.Manager, requiredTags []string, logger *zap.Logger) *Manager {
 	return &Manager{
-		conns:      make(map[string]map[string]*Conn),
-		queries:    q,
-		sseManager: sseManager,
-		logger:     logger,
+		conns:        make(map[string]map[string]*Conn),
+		queries:      q,
+		sseManager:   sseManager,
+		state:        newStateStore(),
+		requiredTags: requiredTags,
+		logger:       logger,
 	}
 }
 
@@ -116,9 +121,28 @@ func (m *Manager) HandleWS(c echo.Context) error {
 	m.register(conn)
 	defer m.unregister(conn)
 
-	// Read loop (future: handle messages from fs agent)
+	m.touchLastSeen(agentID)
+	// Record the last moment the agent was online when it disconnects.
+	defer m.touchLastSeen(agentID)
+
+	// Request the agent's current library state immediately so hub data is
+	// fresh after every (re)connect — no manual sync needed.
+	if err := conn.sendProto(&fspb.Envelope{
+		Payload: &fspb.Envelope_SyncRequest{
+			SyncRequest: &fspb.SyncRequest{Full: false},
+		},
+	}); err != nil {
+		m.logger.Warn("failed to request initial sync", zap.String("agent_id", agentID), zap.Error(err))
+	}
+
 	m.readLoop(conn)
 	return nil
+}
+
+func (m *Manager) touchLastSeen(agentID string) {
+	if err := m.queries.TouchFsAgentLastSeen(context.Background(), agentID); err != nil {
+		m.logger.Warn("failed to update agent last_seen", zap.String("agent_id", agentID), zap.Error(err))
+	}
 }
 
 // authenticate runs the challenge-response handshake.
@@ -262,58 +286,50 @@ func (m *Manager) handleMessage(conn *Conn, env *fspb.Envelope) {
 	}
 }
 
-type trackIssue struct {
-	Rpath   string   `json:"rpath"`
-	Missing []string `json:"missing"`
-}
-
-func missingTags(t *fspb.TrackEntry) []string {
-	var missing []string
-	if t.Title == "" {
-		missing = append(missing, "title")
-	}
-	if t.Album == "" {
-		missing = append(missing, "album")
-	}
-	if t.Artist == "" {
-		missing = append(missing, "artist")
-	}
-	if t.Year == 0 {
-		missing = append(missing, "year")
-	}
-	if t.TrackNum == 0 {
-		missing = append(missing, "track_num")
-	}
-	return missing
-}
-
 func (m *Manager) processScanResult(conn *Conn, result *fspb.ScanResult) {
 	ctx := context.Background()
 	userID := conn.UserID
 
 	type rgGroup struct {
 		perfect bool
-		issues  []trackIssue
+		issues  []TrackIssue
 	}
 	groups := make(map[string]*rgGroup)
+	var untagged []UntaggedTrack
 
 	for _, t := range result.Tracks {
+		missing := validation.Missing(validation.Track{
+			Title:    t.Title,
+			Album:    t.Album,
+			Artist:   t.Artist,
+			Year:     int(t.Year),
+			TrackNum: int(t.TrackNum),
+		}, m.requiredTags)
+
 		if t.MusicbrainzReleaseGroupId == "" {
+			untagged = append(untagged, UntaggedTrack{
+				AgentID: conn.AgentID,
+				Rpath:   t.Rpath,
+				Title:   t.Title,
+				Album:   t.Album,
+				Artist:  t.Artist,
+			})
 			continue
 		}
+
 		rg, ok := groups[t.MusicbrainzReleaseGroupId]
 		if !ok {
 			rg = &rgGroup{perfect: true}
 			groups[t.MusicbrainzReleaseGroupId] = rg
 		}
-		if missing := missingTags(t); len(missing) > 0 {
+		if len(missing) > 0 {
 			rg.perfect = false
-			rg.issues = append(rg.issues, trackIssue{Rpath: t.Rpath, Missing: missing})
+			rg.issues = append(rg.issues, TrackIssue{Rpath: t.Rpath, Missing: missing})
 		}
 	}
 
 	states := make(map[string]string, len(groups))
-	issues := make(map[string][]trackIssue)
+	issues := make(map[string][]TrackIssue)
 	for rgID, rg := range groups {
 		if rg.perfect {
 			states[rgID] = string(model.RGStatePerfect)
@@ -323,28 +339,32 @@ func (m *Manager) processScanResult(conn *Conn, result *fspb.ScanResult) {
 		}
 	}
 
-	if len(states) == 0 {
-		return
-	}
-
-	if err := m.queries.UpsertReleaseGroupStates(ctx, userID, states); err != nil {
-		m.logger.Error("failed to upsert release group states",
+	// Replace (not merge) this agent's states so removed/fixed files don't
+	// leave stale rows behind. An empty scan clears them entirely.
+	if err := m.queries.ReplaceAgentReleaseGroupStates(ctx, userID, conn.AgentID, states); err != nil {
+		m.logger.Error("failed to replace release group states",
 			zap.String("agent_id", conn.AgentID),
 			zap.Error(err),
 		)
 		return
 	}
 
-	m.sseManager.Broadcast("fs:synced", map[string]interface{}{
-		"user_id": userID,
-		"states":  states,
-		"issues":  issues,
+	m.state.setScan(userID, conn.AgentID, issues, untagged)
+
+	// Issue/untagged details are fetched on demand over REST; the event just
+	// signals "fresh data available".
+	m.sseManager.SendToUser(userID, "fs:synced", map[string]interface{}{
+		"agent_id":       conn.AgentID,
+		"tracks":         len(result.Tracks),
+		"release_groups": len(states),
+		"untagged":       len(untagged),
 	})
 
 	m.logger.Info("processed scan result",
 		zap.String("agent_id", conn.AgentID),
 		zap.Int("tracks", len(result.Tracks)),
 		zap.Int("release_groups", len(states)),
+		zap.Int("untagged", len(untagged)),
 	)
 }
 
@@ -383,4 +403,41 @@ func (m *Manager) RequestSync(userID string, full bool) int {
 		sent++
 	}
 	return sent
+}
+
+// IsConnected reports whether the given agent currently has a live WS connection.
+func (m *Manager) IsConnected(userID, agentID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.conns[userID][agentID]
+	return ok
+}
+
+// IssuesFor returns tag issues for one release group, merged across the
+// user's agents.
+func (m *Manager) IssuesFor(userID, rgID string) []TrackIssue {
+	return m.state.issuesFor(userID, rgID)
+}
+
+// UntaggedFor returns all scanned tracks lacking MusicBrainz IDs for a user.
+func (m *Manager) UntaggedFor(userID string) []UntaggedTrack {
+	return m.state.untaggedFor(userID)
+}
+
+// HasUntaggedMatch reports whether an untagged track plausibly matches the
+// given artist name + release-group title.
+func (m *Manager) HasUntaggedMatch(userID, artistName, rgTitle string) bool {
+	return m.state.hasUntaggedMatch(userID, artistName, rgTitle)
+}
+
+// DropAgent disconnects an agent's live connection (if any) and discards its
+// in-memory scan state. Called when an agent registration is deleted.
+func (m *Manager) DropAgent(userID, agentID string) {
+	m.mu.RLock()
+	conn := m.conns[userID][agentID]
+	m.mu.RUnlock()
+	if conn != nil {
+		conn.ws.Close() // readLoop exits -> unregister runs
+	}
+	m.state.dropAgent(userID, agentID)
 }

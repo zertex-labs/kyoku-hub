@@ -112,18 +112,18 @@ func main() {
 	// Brainz HTTP API client (for proxying REST requests)
 	brainzAPI := brainzclient.NewAPI(cfg.BrainzAPIURL)
 
-	artistHandler := handler.NewArtistHandler(cfg, q, bc, brainzAPI, log)
+	// Fs agent WS endpoint (challenge-response auth, no session needed)
+	agentManager := fsagent.NewManager(q, sseManager, cfg.RequiredTags, log)
+	e.GET("/ws/agent", agentManager.HandleWS)
+
+	artistHandler := handler.NewArtistHandler(cfg, q, bc, brainzAPI, agentManager, log)
 	artistHandler.Register(e.Group("/api/artist"))
 
 	// Fs agent management (REST endpoints)
-	agentHandler := handler.NewAgentHandler(q)
+	agentHandler := handler.NewAgentHandler(q, agentManager)
 	agentHandler.Register(e.Group("/api/agent"))
 
-	// Fs agent WS endpoint (challenge-response auth, no session needed)
-	agentManager := fsagent.NewManager(q, sseManager, log)
-	e.GET("/ws/agent", agentManager.HandleWS)
-
-	// Fs sync endpoint
+	// Fs sync + on-demand scan details
 	fsSyncHandler := handler.NewFsSyncHandler(q, agentManager)
 	fsSyncHandler.Register(e.Group("/api/fs"))
 

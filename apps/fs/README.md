@@ -8,6 +8,9 @@ Local file agent. Runs on the user's machine or NAS, reads music files, connects
 - Caches folder mtimes in SQLite — skips unchanged directories on subsequent scans
 - Exposes `GET /api/fs/data` (quick scan) and `GET /api/fs/data?full=1` (force rescan)
 - Authenticates with hub via ED25519 keypair challenge-response
+- Syncs automatically right after every (re)connect — hub requests the current library state
+- Reconnects with exponential backoff + jitter; detects half-dead connections via hub pings
+- Tolerates unreadable files/dirs: they're logged and skipped, the scan continues
 
 ## Config (env vars)
 

@@ -11,7 +11,6 @@ import (
 
 	tag "github.com/dhowden/tag"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/gommon/log"
 	"go.uber.org/zap"
 )
 
@@ -115,8 +114,9 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				h.logger.Error("got error from walk")
-				return err
+				// Unreadable entry: log and keep scanning the rest.
+				h.logger.Warn("walk error, skipping entry", zap.String("path", path), zap.Error(err))
+				return nil
 			}
 
 			if info.IsDir() {
@@ -151,16 +151,17 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 			relativePath, err := filepath.Rel(dir, path)
 			if err != nil {
-				log.Error("failed to get relative path for " + path)
-				return err
+				h.logger.Warn("failed to get relative path, skipping file", zap.String("path", path), zap.Error(err))
+				return nil
 			}
 			filedata, err := h.CompleteMetadata(dir, BaseFileData{
 				ModTime:      info.ModTime(),
 				RelativePath: relativePath,
 			})
 			if err != nil {
-				log.Error("failed to complete metadata for " + path)
-				return err
+				// Corrupt/unreadable tags shouldn't abort the whole scan.
+				h.logger.Warn("failed to read metadata, skipping file", zap.String("path", path), zap.Error(err))
+				return nil
 			}
 
 			if h.cache != nil {

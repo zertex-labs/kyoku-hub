@@ -41,6 +41,12 @@ func (q *Queries) CountArtistSubscribers(ctx context.Context, mbArtistID string)
 	return count, err
 }
 
+func (q *Queries) GetArtistName(ctx context.Context, mbArtistID string) (string, error) {
+	var name string
+	err := q.Pool.QueryRow(ctx, `SELECT name FROM artists WHERE mb_artist_id = $1`, mbArtistID).Scan(&name)
+	return name, err
+}
+
 func (q *Queries) DeactivateArtist(ctx context.Context, mbArtistID string) error {
 	_, err := q.Pool.Exec(ctx, `UPDATE artists SET active = false WHERE mb_artist_id = $1`, mbArtistID)
 	return err
