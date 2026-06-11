@@ -9,7 +9,6 @@ const MAX_DESCRIPTION_LENGTH = 350;
 const coverErrors = ref<Set<string>>(new Set());
 const coverLoaded = ref<Set<string>>(new Set());
 
-
 function onCoverLoad(rgId: string) {
   coverLoaded.value = new Set([...coverLoaded.value, rgId]);
 }
@@ -80,24 +79,8 @@ const sortedTypes = computed(() =>
   }),
 );
 
-// FS issues modal (issue details are fetched on demand when opened)
-const fsStore = useFsStore();
+// FS issues modal (the component fetches issue details on demand)
 const badModalRg = ref<ReleaseGroup | null>(null);
-const badModalIssues = ref<TrackIssue[]>([]);
-const loadingIssues = ref(false);
-
-async function openBadModal(rg: ReleaseGroup) {
-  badModalRg.value = rg;
-  badModalIssues.value = [];
-  loadingIssues.value = true;
-  try {
-    badModalIssues.value = await fsStore.fetchIssues(rg.mb_release_group_id);
-  } catch (e) {
-    console.error("Failed to fetch tag issues:", e);
-  } finally {
-    loadingIssues.value = false;
-  }
-}
 
 // SSE: real-time updates for this artist
 const { on, off } = useSSE();
@@ -247,13 +230,22 @@ onUnmounted(() => {
                   :class="{
                     'bg-green-500/20 text-green-400': rg.fs_state === 'PERFECT',
                     'bg-yellow-500/20 text-yellow-400': rg.fs_state === 'MB_MISS',
-                    'bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer': rg.fs_state === 'BAD',
+                    'bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer':
+                      rg.fs_state === 'BAD',
                     'bg-white/5 text-gray-600': rg.fs_state === 'MISSING',
                   }"
                   :title="rg.fs_state"
-                  @click.prevent="rg.fs_state === 'BAD' && openBadModal(rg)"
+                  @click.prevent="rg.fs_state === 'BAD' && (badModalRg = rg)"
                 >
-                  {{ rg.fs_state === 'PERFECT' ? '✓' : rg.fs_state === 'MB_MISS' ? 'MB?' : rg.fs_state === 'BAD' ? '!' : '–' }}
+                  {{
+                    rg.fs_state === "PERFECT"
+                      ? "✓"
+                      : rg.fs_state === "MB_MISS"
+                        ? "MB?"
+                        : rg.fs_state === "BAD"
+                          ? "!"
+                          : "–"
+                  }}
                 </component>
               </div>
             </div>
@@ -267,94 +259,18 @@ onUnmounted(() => {
     </div>
 
     <!-- Bio Modal -->
-    <Teleport to="body">
-      <Transition
-        enter-active-class="transition duration-150 ease-out"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition duration-100 ease-in"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
-      >
-        <div v-if="showBioModal" class="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            class="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            @click="showBioModal = false"
-          />
-          <div
-            class="relative w-full max-w-lg max-h-[80vh] bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl flex flex-col"
-          >
-            <div
-              class="flex items-center justify-between px-5 py-4 border-b border-white/5 shrink-0"
-            >
-              <h2 class="text-sm font-semibold text-white">About {{ artist.name }}</h2>
-              <button
-                @click="showBioModal = false"
-                class="text-gray-500 hover:text-white transition-colors"
-              >
-                <Icon name="lucide:x" class="w-5 h-5" />
-              </button>
-            </div>
-            <div class="p-4 overflow-y-auto flex-1 min-h-0 mt-1 mb-2">
-              <p class="text-sm text-gray-300 leading-relaxed whitespace-pre-line max-h-[200px]">
-                {{ description }}
-              </p>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ModalsArtistBio
+      :open="showBioModal"
+      :name="artist.name"
+      :description="description"
+      @close="showBioModal = false"
+    />
 
     <!-- BAD Tags Modal -->
-    <Teleport to="body">
-      <Transition
-        enter-active-class="transition duration-150 ease-out"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition duration-100 ease-in"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
-      >
-        <div v-if="badModalRg" class="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="badModalRg = null" />
-          <div
-            class="relative w-full max-w-xl max-h-[80vh] bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl flex flex-col"
-          >
-            <div class="flex items-center justify-between px-5 py-4 border-b border-white/5 shrink-0">
-              <div>
-                <h2 class="text-sm font-semibold text-white">Tag Issues</h2>
-                <p class="text-xs text-gray-500 mt-0.5">{{ badModalRg.title }}</p>
-              </div>
-              <button @click="badModalRg = null" class="text-gray-500 hover:text-white transition-colors">
-                <Icon name="lucide:x" class="w-5 h-5" />
-              </button>
-            </div>
-            <div class="overflow-y-auto flex-1 min-h-0">
-              <div v-if="loadingIssues" class="p-5 flex items-center gap-2 text-sm text-gray-500">
-                <Icon name="lucide:loader-2" class="w-4 h-4 animate-spin" />
-                Loading issues…
-              </div>
-              <div v-else-if="badModalIssues.length === 0" class="p-5 text-sm text-gray-500">
-                No issue details available. The agent may be offline — try running a sync.
-              </div>
-              <div v-else class="divide-y divide-white/5">
-                <div v-for="issue in badModalIssues" :key="issue.rpath" class="px-5 py-3">
-                  <p class="text-xs text-gray-300 truncate font-mono mb-1.5">{{ issue.rpath }}</p>
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      v-for="tag in issue.missing"
-                      :key="tag"
-                      class="text-[11px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 font-medium"
-                    >
-                      {{ tag }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ModalsTagIssues
+      :rg-id="badModalRg?.mb_release_group_id ?? null"
+      :rg-title="badModalRg?.title"
+      @close="badModalRg = null"
+    />
   </div>
 </template>
