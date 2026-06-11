@@ -339,14 +339,28 @@ function formatDate(date: string): string {
               :key="agent.id"
               class="group flex items-center gap-3 px-5 py-4 bg-white/[0.02]"
             >
-              <div class="w-9 h-9 shrink-0 rounded-lg bg-white/5 flex items-center justify-center">
+              <div class="relative w-9 h-9 shrink-0 rounded-lg bg-white/5 flex items-center justify-center">
                 <Icon name="lucide:hard-drive" class="w-4 h-4 text-gray-400" />
+                <span
+                  class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#111114]"
+                  :class="agent.connected ? 'bg-green-500' : 'bg-gray-600'"
+                  :title="agent.connected ? 'Online' : 'Offline'"
+                />
               </div>
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-white truncate">
                   {{ agent.label || "Unnamed agent" }}
+                  <span
+                    class="ml-1.5 text-[10px] font-semibold uppercase tracking-wide align-middle"
+                    :class="agent.connected ? 'text-green-400' : 'text-gray-600'"
+                  >
+                    {{ agent.connected ? "online" : "offline" }}
+                  </span>
                 </p>
                 <p class="text-xs text-gray-500 mt-0.5">
+                  <template v-if="!agent.connected">
+                    {{ agent.last_seen_at ? `Last seen ${formatDate(agent.last_seen_at)} · ` : "Never connected · " }}
+                  </template>
                   Added {{ formatDate(agent.created_at) }} · <span class="font-mono">{{ agent.id }}</span>
                 </p>
               </div>

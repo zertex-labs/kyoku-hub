@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -11,14 +12,21 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/handler"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
 const (
-	authTimeout    = 10 * time.Second
-	connectRetry   = 5 * time.Second
-	reconnectDelay = 2 * time.Second
-	writeWait      = 10 * time.Second
+	authTimeout = 10 * time.Second
+	writeWait   = 10 * time.Second
+
+	// Reconnect backoff: exponential with jitter, reset after a successful connect.
+	backoffMin = 1 * time.Second
+	backoffMax = 60 * time.Second
+
+	// Hub pings every ~54s; if nothing arrives within this window the
+	// connection is considered dead and we reconnect.
+	serverPingWait = 90 * time.Second
 )
 
 // Client manages the outbound WebSocket connection from fs to hub.
@@ -26,23 +34,30 @@ type Client struct {
 	url        string
 	agentID    string
 	privateKey ed25519.PrivateKey
+	fsHandler  *handler.FsHandler
 	logger     *zap.Logger
 
 	conn *websocket.Conn
 	mu   sync.Mutex
+
+	scanMu sync.Mutex // serializes scans triggered by sync requests
 }
 
-func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, logger *zap.Logger) *Client {
+func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, fsHandler *handler.FsHandler, logger *zap.Logger) *Client {
 	return &Client{
 		url:        hubWSURL,
 		agentID:    agentID,
 		privateKey: privateKey,
+		fsHandler:  fsHandler,
 		logger:     logger,
 	}
 }
 
-// Run connects to hub and maintains the connection. Reconnects on failure. Blocks until ctx is cancelled.
+// Run connects to hub and maintains the connection. Reconnects on failure
+// with exponential backoff. Blocks until ctx is cancelled.
 func (c *Client) Run(ctx context.Context) {
+	backoff := backoffMin
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -51,22 +66,48 @@ func (c *Client) Run(ctx context.Context) {
 		}
 
 		if err := c.connect(ctx); err != nil {
-			c.logger.Warn("hub ws connect failed, retrying", zap.Duration("retry_in", connectRetry), zap.Error(err))
-			select {
-			case <-ctx.Done():
+			delay := withJitter(backoff)
+			c.logger.Warn("hub ws connect failed, retrying", zap.Duration("retry_in", delay), zap.Error(err))
+			if !sleepCtx(ctx, delay) {
 				return
-			case <-time.After(connectRetry):
 			}
+			backoff = nextBackoff(backoff)
 			continue
 		}
 
+		backoff = backoffMin // connected + authenticated: reset backoff
 		c.readLoop(ctx)
-		c.logger.Info("hub ws disconnected, reconnecting", zap.Duration("retry_in", reconnectDelay))
-		select {
-		case <-ctx.Done():
+
+		delay := withJitter(backoff)
+		c.logger.Info("hub ws disconnected, reconnecting", zap.Duration("retry_in", delay))
+		if !sleepCtx(ctx, delay) {
 			return
-		case <-time.After(reconnectDelay):
 		}
+		backoff = nextBackoff(backoff)
+	}
+}
+
+func nextBackoff(d time.Duration) time.Duration {
+	d *= 2
+	if d > backoffMax {
+		return backoffMax
+	}
+	return d
+}
+
+// withJitter returns d ± up to 25% to avoid reconnect stampedes.
+func withJitter(d time.Duration) time.Duration {
+	jitter := time.Duration(rand.Int63n(int64(d) / 2))
+	return d*3/4 + jitter
+}
+
+// sleepCtx sleeps for d; returns false if ctx was cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
 
@@ -82,6 +123,14 @@ func (c *Client) connect(ctx context.Context) error {
 		conn.Close()
 		return fmt.Errorf("auth: %w", err)
 	}
+
+	// Detect half-dead connections: hub pings periodically, so something
+	// must arrive within serverPingWait or the read times out.
+	conn.SetReadDeadline(time.Now().Add(serverPingWait))
+	conn.SetPingHandler(func(message string) error {
+		conn.SetReadDeadline(time.Now().Add(serverPingWait))
+		return conn.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(writeWait))
+	})
 
 	c.mu.Lock()
 	c.conn = conn
@@ -187,8 +236,60 @@ func (c *Client) readLoop(ctx context.Context) {
 }
 
 func (c *Client) handleMessage(ctx context.Context, env *fspb.Envelope) {
-	// Future: handle scan requests, etc.
-	c.logger.Debug("received message from hub (no handlers yet)")
+	switch p := env.Payload.(type) {
+	case *fspb.Envelope_SyncRequest:
+		go c.handleSyncRequest(p.SyncRequest)
+	default:
+		c.logger.Debug("received unhandled message from hub")
+	}
+}
+
+func (c *Client) handleSyncRequest(req *fspb.SyncRequest) {
+	// Serialize scans. Full rescans are explicit user intent, so they wait
+	// for the running scan; incremental ones arriving mid-scan are dropped
+	// (the in-flight scan's result is fresh enough).
+	if !c.scanMu.TryLock() {
+		if !req.Full {
+			c.logger.Info("scan already in progress, skipping sync request")
+			return
+		}
+		c.scanMu.Lock()
+	}
+	defer c.scanMu.Unlock()
+
+	c.logger.Info("received sync request", zap.Bool("full", req.Full))
+
+	dirs, err := c.fsHandler.ScanDirs(c.fsHandler.ScanDirsConfig(), req.Full)
+	if err != nil {
+		c.logger.Error("scan failed", zap.Error(err))
+		return
+	}
+
+	var tracks []*fspb.TrackEntry
+	for _, files := range dirs {
+		for _, f := range files {
+			tracks = append(tracks, &fspb.TrackEntry{
+				Rpath:                      f.RelativePath,
+				Title:                      f.MusicTags.Title,
+				Album:                      f.MusicTags.Album,
+				Artist:                     f.MusicTags.Artist,
+				Year:                       int32(f.MusicTags.Year),
+				TrackNum:                   int32(f.MusicTags.TrackNum),
+				MusicbrainzReleaseGroupId:  f.MusicTags.MusicBrainzReleaseGroupID,
+				MusicbrainzArtistId:        f.MusicTags.MusicBrainzArtistID,
+			})
+		}
+	}
+
+	if err := c.send(&fspb.Envelope{
+		Payload: &fspb.Envelope_ScanResult{
+			ScanResult: &fspb.ScanResult{Tracks: tracks},
+		},
+	}); err != nil {
+		c.logger.Error("failed to send scan result", zap.Error(err))
+	}
+
+	c.logger.Info("scan result sent", zap.Int("tracks", len(tracks)))
 }
 
 func (c *Client) send(msg *fspb.Envelope) error {

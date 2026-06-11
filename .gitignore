@@ -1,1 +1,10 @@
 TODO.md
+
+# Compiled binaries
+/server
+/apps/fs/server
+/apps/hub/backend/server
+/apps/brainz/server
+
+# Local env files
+.env

@@ -8,15 +8,17 @@ import (
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
 )
 
 type AgentHandler struct {
-	queries *queries.Queries
+	queries      *queries.Queries
+	agentManager *fsagent.Manager
 }
 
-func NewAgentHandler(q *queries.Queries) *AgentHandler {
-	return &AgentHandler{queries: q}
+func NewAgentHandler(q *queries.Queries, am *fsagent.Manager) *AgentHandler {
+	return &AgentHandler{queries: q, agentManager: am}
 }
 
 func (h *AgentHandler) Register(g *echo.Group) {
@@ -71,7 +73,8 @@ func (h *AgentHandler) RegisterAgent(c echo.Context) error {
 	})
 }
 
-// ListAgents returns all fs agents for the authenticated user.
+// ListAgents returns all fs agents for the authenticated user, including
+// live connection status.
 func (h *AgentHandler) ListAgents(c echo.Context) error {
 	user := c.Get("user").(*model.User)
 
@@ -80,10 +83,15 @@ func (h *AgentHandler) ListAgents(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list agents"})
 	}
 
+	for i := range agents {
+		agents[i].Connected = h.agentManager.IsConnected(user.ID, agents[i].ID)
+	}
+
 	return c.JSON(http.StatusOK, agents)
 }
 
-// DeleteAgent removes an fs agent registration.
+// DeleteAgent removes an fs agent registration and tears down its live
+// connection and cached scan state.
 func (h *AgentHandler) DeleteAgent(c echo.Context) error {
 	user := c.Get("user").(*model.User)
 	agentID := c.Param("id")
@@ -91,6 +99,8 @@ func (h *AgentHandler) DeleteAgent(c echo.Context) error {
 	if err := h.queries.DeleteFsAgent(c.Request().Context(), agentID, user.ID); err != nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "agent not found"})
 	}
+
+	h.agentManager.DropAgent(user.ID, agentID)
 
 	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }

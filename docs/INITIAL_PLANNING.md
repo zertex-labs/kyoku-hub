@@ -64,7 +64,7 @@ kyoku/
 - Runs on user's machine or NAS, wherever the music files are
 - Reads local files, exposes metadata (tags, album, artist, path, etc.)
 - Connects outbound to hub backend via WS (no port exposure needed for user)
-- In-memory cache: stores folder change-times, skips unchanged folders, rescans on mismatch
+- Folder change-time cache: stores folder mtimes, skips unchanged folders, rescans on mismatch. Implemented as a local SQLite db (instead of in-memory as originally planned) so restarts don't force a full rescan; loss of the db is non-critical
 - Auth: keypair tied to user ID
 
 ## Packages
@@ -119,20 +119,22 @@ hub backend (Go) <--(HTTP + WS JSON)-- Vue SPA
 - Hub accepts the connection on a WS endpoint (e.g. `/ws/agent`)
 - Auth: keypair challenge-response tied to user ID
 - Once connected, communication is bidirectional over the same WS
-- On reconnect: hub requests current state from fs over the WS connection (fresh data, no queuing)
+- On (re)connect: hub immediately sends a SyncRequest, fs responds with its current library state (fresh data, no queuing)
+- Hub validates tags via `packages/validation` (required tags configurable via `REQUIRED_TAGS`), persists per-agent release-group states, and keeps per-track issues + untagged files in memory (served on demand via REST: `GET /api/fs/issues?rg=`, `GET /api/fs/untagged`)
+- Tracks without a MusicBrainz release-group ID are matched against release groups by normalized artist+title at read time -> `MB_MISS` state
 
 ### Hub <-> Frontend
 
 - HTTP REST for data fetching
-- WebSocket for real-time updates (artist changes from brainz, download progress, etc.)
+- SSE (`GET /api/events`) for real-time updates (artist changes from brainz, fs sync notifications). Events with user-private payloads are sent only to that user's connections; shared artist updates are broadcast
 
 ## Databases
 
 | App    | Engine    | Stores                                                                                      |
 | ------ | --------- | ------------------------------------------------------------------------------------------- |
 | brainz | Postgres  | Artists, release-groups, releases, hub registrations, subscriptions, request counts         |
-| hub    | Postgres  | Users, sessions, tracked artists (with sync status), user-artist links                     |
-| fs     | In-memory | Folder change-time cache                                                                    |
+| hub    | Postgres  | Users, sessions, tracked artists (with sync status), user-artist links, fs agents, per-agent release-group states |
+| fs     | SQLite    | Folder change-time cache + file tag cache (loss = full rescan, non-critical)                |
 
 ### Hub Database Schema
 

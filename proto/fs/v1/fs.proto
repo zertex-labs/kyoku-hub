@@ -14,6 +14,12 @@ message Envelope {
 
     // Auth handshake (fs -> hub)
     ChallengeResponse challenge_response = 3;
+
+    // Sync (hub -> fs)
+    SyncRequest sync_request = 4;
+
+    // Sync (fs -> hub)
+    ScanResult scan_result = 5;
   }
 }
 
@@ -31,4 +37,26 @@ message ChallengeResponse {
 message AuthResult {
   bool success = 1;
   string error = 2;
+}
+
+// Hub -> Fs: trigger a library scan
+message SyncRequest {
+  bool full = 1; // if true, bypass cache and do a full rescan
+}
+
+// A single track's metadata from the fs scan
+message TrackEntry {
+  string rpath = 1;
+  string title = 2;
+  string album = 3;
+  string artist = 4;
+  int32 year = 5;
+  int32 track_num = 6;
+  string musicbrainz_release_group_id = 7;
+  string musicbrainz_artist_id = 8;
+}
+
+// Fs -> Hub: scan results
+message ScanResult {
+  repeated TrackEntry tracks = 1;
 }

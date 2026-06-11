@@ -11,6 +11,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 
+	"github.com/zertex-labs/kyoku-hub/packages/logger"
+
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/cache"
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/brainz/internal/database"
@@ -23,31 +25,31 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	logger, _ := zap.NewDevelopment(zap.WithCaller(false))
-	defer logger.Sync()
+	log := logger.New("brainz")
+	defer log.Sync()
 
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Fatal("configuration error", zap.Error(err))
+		log.Fatal("configuration error", zap.Error(err))
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Database
-	db, err := database.Connect(ctx, cfg.DBUrl, logger)
+	db, err := database.Connect(ctx, cfg.DBUrl, log)
 	if err != nil {
-		logger.Fatal("failed to connect to database", zap.Error(err))
+		log.Fatal("failed to connect to database", zap.Error(err))
 	}
 	defer db.Close()
 
-	if err := database.Migrate(ctx, db, logger); err != nil {
-		logger.Fatal("failed to migrate database", zap.Error(err))
+	if err := database.Migrate(ctx, db, log); err != nil {
+		log.Fatal("failed to migrate database", zap.Error(err))
 	}
 
 	// Cache
-	c, err := cache.New(cfg, logger)
+	c, err := cache.New(cfg, log)
 	if err != nil {
-		logger.Fatal("failed to init cache", zap.Error(err))
+		log.Fatal("failed to init cache", zap.Error(err))
 	}
 	defer c.Close()
 
@@ -55,10 +57,10 @@ func main() {
 	mb := musicbrainz.NewClient("Kyoku/0.1 (https://github.com/zertex-labs/kyoku-hub)")
 
 	// Hub (manages connected hub instances)
-	h := hub.New(logger)
+	h := hub.New(log)
 
 	// Worker
-	w := worker.New(db, c, cfg, mb, h, logger)
+	w := worker.New(db, c, cfg, mb, h, log)
 	go w.Run(ctx)
 
 	// Echo server
@@ -66,20 +68,20 @@ func main() {
 	e.HideBanner = true
 
 	api := e.Group("/api")
-	artistHandler := handler.NewArtistHandler(db, c, mb, logger)
+	artistHandler := handler.NewArtistHandler(db, c, mb, log)
 	artistHandler.RegisterRoutes(api)
 
-	wsHandler := handler.NewWSHandler(h, db, logger)
+	wsHandler := handler.NewWSHandler(h, db, log)
 	wsHandler.RegisterRoutes(e)
 
 	go func() {
 		<-ctx.Done()
-		logger.Info("shutting down server")
+		log.Info("shutting down server")
 		e.Close()
 	}()
 
-	logger.Info("starting brainz server", zap.String("port", cfg.Port))
+	log.Info("starting brainz server", zap.String("port", cfg.Port))
 	if err := e.Start(fmt.Sprintf(":%s", cfg.Port)); err != nil {
-		logger.Info("server stopped", zap.Error(err))
+		log.Info("server stopped", zap.Error(err))
 	}
 }

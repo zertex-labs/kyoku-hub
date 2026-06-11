@@ -3,20 +3,42 @@ const artistStore = useArtistStore();
 const { artists: trackedArtists } = storeToRefs(artistStore);
 await artistStore.fetchArtists();
 
-const searchStore = useMBAristSearchStore();
-const { r$, loadedArtists, hasMore } = storeToRefs(searchStore);
-
 const activities = ref<ArtistActivity[]>([]);
 
 const showAddModal = ref(false);
-const searchQuery = ref("");
-const searching = ref(false);
-const loadingMore = ref(false);
-const adding = ref(false);
 const nameFilter = ref("");
+const syncing = ref(false);
+
+async function triggerSync() {
+  if (syncing.value) return;
+  syncing.value = true;
+  try {
+    await $fetch(`${useRuntimeConfig().public.apiBaseUrl}/api/fs/sync`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch (e) {
+    console.error("Sync failed:", e);
+  } finally {
+    syncing.value = false;
+  }
+}
+
+// Untagged files (scanned by fs agents but lacking MusicBrainz IDs)
+const fsStore = useFsStore();
+const { untagged } = storeToRefs(fsStore);
+const showUntagged = ref(false);
+
+if (import.meta.client) {
+  fsStore.fetchUntagged().catch((e) => console.error("Failed to fetch untagged files:", e));
+}
 
 // SSE: real-time artist updates
 const { on, off } = useSSE();
+
+function handleFsSynced() {
+  fsStore.fetchUntagged().catch(() => {});
+}
 
 function handleArtistStatus(data: { mb_artist_id: string; status: string }) {
   const artist = trackedArtists.value.find((a) => a.mb_artist_id === data.mb_artist_id);
@@ -49,11 +71,13 @@ function handleArtistFailed(data: { mb_artist_id: string }) {
 on("artist:status", handleArtistStatus);
 on("artist:updated", handleArtistUpdated);
 on("artist:failed", handleArtistFailed);
+on("fs:synced", handleFsSynced);
 
 onUnmounted(() => {
   off("artist:status", handleArtistStatus);
   off("artist:updated", handleArtistUpdated);
   off("artist:failed", handleArtistFailed);
+  off("fs:synced", handleFsSynced);
 });
 
 const filteredArtists = computed(() => {
@@ -73,57 +97,6 @@ function timeAgo(date: string): string {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
-}
-
-async function handleSearch() {
-  if (!searchQuery.value.trim()) return;
-  searching.value = true;
-  try {
-    r$.value.artistName.$value = searchQuery.value.trim();
-    await searchStore.doSearch();
-  } catch (e) {
-    console.error("Search failed:", e);
-  } finally {
-    searching.value = false;
-  }
-}
-
-async function handleLoadMore() {
-  loadingMore.value = true;
-  try {
-    await searchStore.loadMore();
-  } catch (e) {
-    console.error("Load more failed:", e);
-  } finally {
-    loadingMore.value = false;
-  }
-}
-
-async function addArtist(artist: { id: string; name: string; disambiguation?: string }) {
-  if (adding.value) return;
-  adding.value = true;
-  try {
-    await artistStore.addArtist(artist.id, artist.name, artist.disambiguation ?? "");
-    showAddModal.value = false;
-    searchQuery.value = "";
-    loadedArtists.value = [];
-  } catch (e: any) {
-    console.error("Failed to add artist:", e.data?.statusMessage || e.message);
-  } finally {
-    adding.value = false;
-  }
-}
-
-function openModal() {
-  showAddModal.value = true;
-  searchQuery.value = "";
-  loadedArtists.value = [];
-}
-
-function closeModal() {
-  showAddModal.value = false;
-  searchQuery.value = "";
-  loadedArtists.value = [];
 }
 
 async function removeArtist(mbArtistId: string) {
@@ -153,7 +126,7 @@ async function removeArtist(mbArtistId: string) {
 
     <!-- Artists -->
     <aside class="w-full lg:w-[45%] shrink-0">
-      <!-- Header: title + filter + add -->
+      <!-- Header: title + filter + sync + add -->
       <div class="flex items-center gap-2 mb-4">
         <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Artists</h2>
         <div class="flex-1" />
@@ -164,7 +137,15 @@ async function removeArtist(mbArtistId: string) {
           class="w-24 h-7 bg-white/5 border border-white/10 rounded-md px-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-400/50 transition-colors"
         />
         <button
-          @click="openModal"
+          @click="triggerSync"
+          :disabled="syncing"
+          class="w-7 h-7 flex items-center justify-center rounded-md border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="Sync library"
+        >
+          <Icon name="lucide:refresh-cw" class="w-3.5 h-3.5" :class="{ 'animate-spin': syncing }" />
+        </button>
+        <button
+          @click="showAddModal = true"
           class="w-7 h-7 flex items-center justify-center rounded-md border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-gray-400 hover:text-white transition-colors"
           title="Add Artist"
         >
@@ -181,13 +162,18 @@ async function removeArtist(mbArtistId: string) {
           v-for="artist in filteredArtists"
           :key="artist.mb_artist_id"
           :to="`/artist/${artist.mb_artist_id}`"
-          class="group flex items-center gap-3 bg-white/[0.03] px-3 py-2 hover:bg-white/[0.06] transition-colors"
+          :data-is-queued="artist.status === 'queued'"
+          class="data-[is-queued=true]:pointer-events-none data-[is-queued=true]:opacity-50 group flex items-center gap-3 bg-white/[0.03] px-3 py-2 hover:bg-white/[0.06] transition-colors"
         >
           <!-- Name + disambiguation + links -->
           <div class="flex items-center gap-2 truncate flex-1">
             <p class="text-sm font-medium text-white truncate">
               {{ artist.name }}
-              <span v-if="artist.disambiguation && artist.disambiguation !== artist.name" class="text-gray-500 font-normal text-xs">({{ artist.disambiguation }})</span>
+              <span
+                v-if="artist.disambiguation && artist.disambiguation !== artist.name"
+                class="text-gray-500 font-normal text-xs"
+                >({{ artist.disambiguation }})</span
+              >
             </p>
             <a
               :href="`https://musicbrainz.org/artist/${artist.mb_artist_id}`"
@@ -209,23 +195,30 @@ async function removeArtist(mbArtistId: string) {
 
           <!-- Release groups -->
           <template v-if="artist.status === 'synced'">
-            <span class="text-[11px] text-orange-400 font-semibold">{{ Math.round(artist.release_group_count * 0.75) }}/{{ artist.release_group_count }}</span>
+            <span class="text-[11px] text-orange-400 font-semibold">
+              {{ Math.round(artist.release_group_count * 0.75) }}/{{ artist.release_group_count }}
+            </span>
             <div class="w-16 h-1 rounded-full bg-white/10 overflow-hidden">
               <div class="h-full rounded-full bg-orange-500" style="width: 75%" />
             </div>
           </template>
-          <span v-else class="text-[11px] text-gray-500 italic">syncing...</span>
+          <span v-else class="text-[11px] text-gray-500 italic">queued</span>
 
           <!-- Last synced -->
-          <span class="text-[11px] text-blue-400 w-14 text-right" title="Last synced">{{ artist.synced_at ? timeAgo(artist.synced_at) : '—' }}</span>
+          <span class="text-[11px] text-blue-400 w-14 text-right" title="Last synced">
+            {{ artist.synced_at ? timeAgo(artist.synced_at) : "—" }}
+          </span>
 
           <!-- Date added -->
-          <span class="text-[11px] text-gray-500 w-14 text-right" title="Date added">{{ timeAgo(artist.created_at) }}</span>
+          <span class="text-[11px] text-gray-500 w-14 text-right" title="Date added">
+            {{ timeAgo(artist.created_at) }}
+          </span>
 
           <!-- Request button -->
           <button
             class="p-0.5 text-gray-600 hover:text-orange-400 transition-colors"
             title="Request sync"
+            @click.stop="console.log"
           >
             <Icon name="lucide:refresh-cw" class="w-3 h-3" />
           </button>
@@ -242,11 +235,7 @@ async function removeArtist(mbArtistId: string) {
               name="lucide:clock"
               class="w-3.5 h-3.5 text-yellow-500"
             />
-            <Icon
-              v-else
-              name="lucide:loader-2"
-              class="w-3.5 h-3.5 text-blue-400 animate-spin"
-            />
+            <Icon v-else name="lucide:loader-2" class="w-3.5 h-3.5 text-blue-400 animate-spin" />
           </div>
 
           <!-- Remove button -->
@@ -261,102 +250,53 @@ async function removeArtist(mbArtistId: string) {
 
       <!-- Empty state -->
       <p v-else class="text-gray-500 text-sm">
-        {{ nameFilter.trim() ? 'No matches. Try a different filter or add a new artist.' : 'No artists yet. Add one to get started.' }}
+        {{
+          nameFilter.trim()
+            ? "No matches. Try a different filter or add a new artist."
+            : "No artists yet. Add one to get started."
+        }}
       </p>
+
+      <!-- Untagged files -->
+      <div
+        v-if="untagged.length"
+        class="mt-4 rounded-lg border border-yellow-500/20 bg-yellow-500/[0.03] overflow-hidden"
+      >
+        <button
+          class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-yellow-500/[0.04] transition-colors"
+          @click="showUntagged = !showUntagged"
+        >
+          <Icon name="lucide:file-question" class="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+          <span class="text-xs font-medium text-yellow-400">
+            {{ untagged.length }} untagged file{{ untagged.length === 1 ? "" : "s" }}
+          </span>
+          <span class="text-[11px] text-gray-500 truncate">missing MusicBrainz tags</span>
+          <div class="flex-1" />
+          <Icon
+            :name="showUntagged ? 'lucide:chevron-up' : 'lucide:chevron-down'"
+            class="w-3.5 h-3.5 text-gray-500 shrink-0"
+          />
+        </button>
+        <div
+          v-if="showUntagged"
+          class="max-h-56 overflow-y-auto divide-y divide-white/5 border-t border-white/5"
+        >
+          <div v-for="t in untagged" :key="`${t.agent_id}:${t.rpath}`" class="px-3 py-2">
+            <p class="text-[11px] text-gray-300 font-mono truncate" :title="t.rpath">
+              {{ t.rpath }}
+            </p>
+            <p v-if="t.artist || t.album" class="text-[11px] text-gray-500 truncate mt-0.5">
+              {{ [t.artist, t.album].filter(Boolean).join(" — ") }}
+            </p>
+          </div>
+          <p class="px-3 py-2 text-[11px] text-gray-600">
+            Tag these files with MusicBrainz Picard so kyoku can match them to release groups.
+          </p>
+        </div>
+      </div>
     </aside>
 
     <!-- Add Artist Modal -->
-    <Teleport to="body">
-      <Transition
-        enter-active-class="transition duration-150 ease-out"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition duration-100 ease-in"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
-      >
-        <div v-if="showAddModal" class="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <!-- Backdrop -->
-          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="closeModal" />
-
-          <!-- Modal -->
-          <div
-            class="relative w-full max-w-md bg-[#1a1a1f] border border-white/10 rounded-xl shadow-2xl overflow-hidden"
-          >
-            <!-- Header -->
-            <div class="flex items-center justify-between px-5 py-4 border-b border-white/5">
-              <h2 class="text-sm font-semibold text-white">Add Artist</h2>
-              <button @click="closeModal" class="text-gray-500 hover:text-white transition-colors">
-                <Icon name="lucide:x" class="w-5 h-5" />
-              </button>
-            </div>
-
-            <!-- Search -->
-            <div class="p-5">
-              <form @submit.prevent="handleSearch" class="flex gap-2">
-                <input
-                  v-model="searchQuery"
-                  type="text"
-                  placeholder="Search for an artist..."
-                  class="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-orange-400/50 transition-colors"
-                  autofocus
-                />
-                <button
-                  type="submit"
-                  :disabled="!searchQuery.trim() || searching"
-                  class="px-4 py-2 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  <Icon v-if="searching" name="lucide:loader-2" class="w-4 h-4 animate-spin" />
-                  <span v-else>Search</span>
-                </button>
-              </form>
-
-              <!-- Results -->
-              <div
-                v-if="loadedArtists.length > 0"
-                class="mt-4 max-h-64 overflow-y-auto flex flex-col gap-1"
-              >
-                <button
-                  v-for="artist in loadedArtists"
-                  :key="artist.id"
-                  @click="addArtist(artist)"
-                  class="flex flex-col items-start w-full px-3 py-2.5 rounded-lg text-left hover:bg-white/5 transition-colors"
-                >
-                  <span class="text-sm text-white">{{ artist.name }}</span>
-                  <span v-if="artist.disambiguation" class="text-xs text-gray-500">
-                    {{ artist.disambiguation }}
-                  </span>
-                </button>
-
-                <!-- Load more -->
-                <button
-                  v-if="hasMore"
-                  @click="handleLoadMore"
-                  :disabled="loadingMore"
-                  class="mt-2 w-full py-2 text-sm text-gray-400 border border-white/10 rounded-lg disabled:animate-pulse transition-colors"
-                  :class="
-                    loadingMore
-                      ? 'opacity-60 cursor-not-allowed'
-                      : 'hover:text-white hover:bg-white/5'
-                  "
-                >
-                  {{ loadingMore ? "Loading..." : "Load more" }}
-                </button>
-              </div>
-
-              <!-- No results -->
-              <p
-                v-else-if="
-                  !searching && searchQuery && loadedArtists.length === 0 && r$.artistName.$dirty
-                "
-                class="mt-4 text-sm text-gray-500 text-center"
-              >
-                No results found.
-              </p>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <ModalsAddArtist :open="showAddModal" @close="showAddModal = false" />
   </div>
 </template>

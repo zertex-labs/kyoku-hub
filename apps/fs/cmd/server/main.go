@@ -13,14 +13,14 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/handler"
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/hubclient"
-	logger "github.com/zertex-labs/kyoku-hub/apps/fs/internal/logger"
+	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/fs/internal/middleware"
 )
 
 func main() {
 	_ = godotenv.Load()
 
-	log := logger.New()
+	log := logger.New("fs")
 	defer log.Sync()
 
 	cfg, err := config.Load()
@@ -61,11 +61,6 @@ func main() {
 		log.Fatal("failed to decode private key", zap.Error(err))
 	}
 
-	// Start hub WS client in background
-	ctx := context.Background()
-	hc := hubclient.NewClient(cfg.HubWSURL, identity.AgentID, privateKey, log)
-	go hc.Run(ctx)
-
 	// HTTP server (health check + local API)
 	e := echo.New()
 	e.HideBanner = true
@@ -80,6 +75,11 @@ func main() {
 
 	fsHandler := handler.NewFsHandler(log, cfg)
 	fsHandler.RegisterRoutes(e.Group("/api/fs"))
+
+	// Start hub WS client in background
+	ctx := context.Background()
+	hc := hubclient.NewClient(cfg.HubWSURL, identity.AgentID, privateKey, fsHandler, log)
+	go hc.Run(ctx)
 
 	log.Info("starting fs agent", zap.String("port", cfg.Port), zap.String("agent_id", identity.AgentID))
 	if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {

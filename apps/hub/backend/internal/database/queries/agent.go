@@ -94,20 +94,29 @@ func (q *Queries) CreateFsAgent(ctx context.Context, userID, label, publicKey st
 func (q *Queries) GetFsAgent(ctx context.Context, agentID string) (*model.FsAgent, error) {
 	agent := &model.FsAgent{}
 	err := q.Pool.QueryRow(ctx,
-		`SELECT id, user_id, label, public_key, created_at
+		`SELECT id, user_id, label, public_key, created_at, last_seen_at
 		 FROM fs_agents WHERE id = $1`,
 		agentID,
-	).Scan(&agent.ID, &agent.UserID, &agent.Label, &agent.PublicKey, &agent.CreatedAt)
+	).Scan(&agent.ID, &agent.UserID, &agent.Label, &agent.PublicKey, &agent.CreatedAt, &agent.LastSeenAt)
 	if err != nil {
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
 	return agent, nil
 }
 
+// TouchFsAgentLastSeen records that an agent was online just now.
+func (q *Queries) TouchFsAgentLastSeen(ctx context.Context, agentID string) error {
+	_, err := q.Pool.Exec(ctx,
+		`UPDATE fs_agents SET last_seen_at = NOW() WHERE id = $1`,
+		agentID,
+	)
+	return err
+}
+
 // ListFsAgents returns all agents for a user.
 func (q *Queries) ListFsAgents(ctx context.Context, userID string) ([]model.FsAgent, error) {
 	rows, err := q.Pool.Query(ctx,
-		`SELECT id, user_id, label, public_key, created_at
+		`SELECT id, user_id, label, public_key, created_at, last_seen_at
 		 FROM fs_agents WHERE user_id = $1 ORDER BY created_at`,
 		userID,
 	)
@@ -119,7 +128,7 @@ func (q *Queries) ListFsAgents(ctx context.Context, userID string) ([]model.FsAg
 	var agents []model.FsAgent
 	for rows.Next() {
 		var a model.FsAgent
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Label, &a.PublicKey, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Label, &a.PublicKey, &a.CreatedAt, &a.LastSeenAt); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)

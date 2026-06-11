@@ -15,9 +15,10 @@ kyoku-hub/
 │
 ├── packages/
 │   ├── musicbrainz-client/  rate-limited MB API client (1 req/s)
-│   ├── validation/          tag validation logic
-│   ├── downloader/          Deezer/Tidal download logic
-│   └── seek/                Soulseek client (future)
+│   ├── validation/          tag validation logic (configurable required tags)
+│   ├── logger/              shared zap logger setup
+│   ├── downloader/          Deezer/Tidal download logic (planned)
+│   └── seek/                Soulseek client (planned)
 │
 ├── proto/               Protobuf definitions + generated Go code
 ├── go.work              Go workspace linking all modules
@@ -53,7 +54,7 @@ brainz  <──(WS + protobuf)──  hub/backend  <──(HTTP + WS JSON)──
 
 | App | Engine | Notes |
 |-----|--------|-------|
-| hub/backend | Postgres | users, sessions, artists, user-artist links |
+| hub/backend | Postgres | users, sessions, artists, user-artist links, fs agents + release-group states |
 | brainz | Postgres | artists, release groups, releases, hub subscriptions |
 | fs | SQLite | folder mtime cache (non-critical, loss = full rescan) |
 

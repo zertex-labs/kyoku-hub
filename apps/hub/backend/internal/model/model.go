@@ -17,12 +17,23 @@ type Session struct {
 }
 
 type FsAgent struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"-"`
-	Label     string    `json:"label"`
-	PublicKey string    `json:"-"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         string     `json:"id"`
+	UserID     string     `json:"-"`
+	Label      string     `json:"label"`
+	PublicKey  string     `json:"-"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	Connected  bool       `json:"connected"` // computed at read time, not persisted
 }
+
+type ReleaseGroupState string
+
+const (
+	RGStatePerfect ReleaseGroupState = "PERFECT"
+	RGStateMBMiss  ReleaseGroupState = "MB_MISS"
+	RGStateBad     ReleaseGroupState = "BAD"
+	RGStateMissing ReleaseGroupState = "MISSING"
+)
 
 type Artist struct {
 	MBArtistID        string     `json:"mb_artist_id"`

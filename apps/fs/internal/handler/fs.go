@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 
 	tag "github.com/dhowden/tag"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/gommon/log"
 	"go.uber.org/zap"
 )
 
@@ -61,14 +59,6 @@ type FsHandler struct {
 	cache  *fsCache
 }
 
-type UnsupportedFileExtensionError struct {
-	Ext string
-}
-
-func (err *UnsupportedFileExtensionError) Error() string {
-	return fmt.Sprintf("unsupported extension: %s", err.Ext)
-}
-
 var SupportedFileExtensions = map[string]bool{
 	".mp3":  true,
 	".flac": true,
@@ -92,6 +82,10 @@ func NewFsHandler(logger *zap.Logger, cfg *config.Config) *FsHandler {
 	}
 
 	return h
+}
+
+func (h *FsHandler) ScanDirsConfig() []string {
+	return h.cfg.ScanDirs
 }
 
 func (h *FsHandler) RegisterRoutes(g *echo.Group) {
@@ -120,8 +114,9 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				h.logger.Error("got error from walk")
-				return err
+				// Unreadable entry: log and keep scanning the rest.
+				h.logger.Warn("walk error, skipping entry", zap.String("path", path), zap.Error(err))
+				return nil
 			}
 
 			if info.IsDir() {
@@ -142,8 +137,8 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 			ext := filepath.Ext(path)
 			if !SupportedFileExtensions[strings.ToLower(ext)] {
-				h.logger.Error("got invalid file extension: " + ext)
-				return &UnsupportedFileExtensionError{Ext: ext}
+				h.logger.Debug("skipping unsupported file", zap.String("ext", ext), zap.String("path", path))
+				return nil
 			}
 
 			parentDir := filepath.Dir(path)
@@ -156,16 +151,17 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 			relativePath, err := filepath.Rel(dir, path)
 			if err != nil {
-				log.Error("failed to get relative path for " + path)
-				return err
+				h.logger.Warn("failed to get relative path, skipping file", zap.String("path", path), zap.Error(err))
+				return nil
 			}
 			filedata, err := h.CompleteMetadata(dir, BaseFileData{
 				ModTime:      info.ModTime(),
 				RelativePath: relativePath,
 			})
 			if err != nil {
-				log.Error("failed to complete metadata for " + path)
-				return err
+				// Corrupt/unreadable tags shouldn't abort the whole scan.
+				h.logger.Warn("failed to read metadata, skipping file", zap.String("path", path), zap.Error(err))
+				return nil
 			}
 
 			if h.cache != nil {
@@ -186,7 +182,7 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 func (h *FsHandler) CompleteMetadata(dir string, base BaseFileData) (FileData, error) {
 	filePath := strings.Join([]string{dir, base.RelativePath}, "/")
-	h.logger.Info("completing path " + filePath)
+	h.logger.Debug("completing path " + filePath)
 
 	f, err := os.OpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {
@@ -227,6 +223,7 @@ func (h *FsHandler) CompleteMetadata(dir string, base BaseFileData) (FileData, e
 func getRawTag(raw map[string]interface{}, keys ...string) string {
 	for _, key := range keys {
 		// Try variations of the key to account for different taggers
+		// TODO: maybe normalize key so we're not doing extra loops
 		variations := []string{key, strings.ToLower(key), strings.ToUpper(key)}
 
 		for _, vKey := range variations {
