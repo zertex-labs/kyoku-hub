@@ -17,9 +17,11 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
-	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
+	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
+	"github.com/zertex-labs/kyoku-hub/packages/downloader"
+	"github.com/zertex-labs/kyoku-hub/packages/downloader/tidal"
 )
 
 func main() {
@@ -126,6 +128,21 @@ func main() {
 	// Fs sync + on-demand scan details
 	fsSyncHandler := handler.NewFsSyncHandler(q, agentManager)
 	fsSyncHandler.Register(e.Group("/api/fs"))
+
+	// Downloader (Tidal) — optional; handler returns 503 when not configured
+	var tidalProvider *tidal.Tidal
+	if cfg.TidalToken != "" {
+		tidalProvider = tidal.New(tidal.Auth{
+			Token:        cfg.TidalToken,
+			RefreshToken: cfg.TidalRefreshToken,
+			CountryCode:  cfg.TidalCountryCode,
+			UserID:       cfg.TidalUserID,
+			ExpiresAt:    cfg.TidalExpiresAt,
+		}, downloader.DefaultConfig())
+		log.Info("tidal downloader configured")
+	}
+	downloadHandler := handler.NewDownloadHandler(sseManager, tidalProvider, cfg.DownloadDir, q, agentManager, log)
+	downloadHandler.Register(e.Group("/api/download"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
 	if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {

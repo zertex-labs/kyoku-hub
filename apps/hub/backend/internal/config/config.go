@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/zertex-labs/kyoku-hub/packages/validation"
@@ -21,6 +22,14 @@ type Config struct {
 	InstanceID              string   // This hub's unique instance ID
 	SecureCookies           bool     // Whether to set Secure flag on cookies (derived from BaseURL)
 	RequiredTags            []string // Tags an fs track must have to be considered complete
+
+	// Tidal downloader (all optional; download endpoints return 503 if unset)
+	TidalToken        string
+	TidalRefreshToken string
+	TidalCountryCode  string
+	TidalUserID       string
+	TidalExpiresAt    int64  // Unix timestamp
+	DownloadDir       string // Directory where downloaded albums are written
 }
 
 func Load() (*Config, error) {
@@ -35,6 +44,16 @@ func Load() (*Config, error) {
 		BrainzWSURL:             getEnv("BRAINZ_WS_URL", "ws://localhost:8081/ws"),
 		BrainzAPIURL:            getEnv("BRAINZ_API_URL", "http://localhost:8081/api"),
 		InstanceID:              getEnv("INSTANCE_ID", "hub-dev-01"),
+
+		TidalToken:        os.Getenv("TIDAL_TOKEN"),
+		TidalRefreshToken: os.Getenv("TIDAL_REFRESH_TOKEN"),
+		TidalCountryCode:  getEnv("TIDAL_COUNTRY_CODE", "US"),
+		TidalUserID:       os.Getenv("TIDAL_USER_ID"),
+		DownloadDir:       getEnv("DOWNLOAD_DIR", "./downloads"),
+	}
+
+	if exp := os.Getenv("TIDAL_EXPIRES_AT"); exp != "" {
+		cfg.TidalExpiresAt, _ = strconv.ParseInt(exp, 10, 64)
 	}
 
 	cfg.SecureCookies = strings.HasPrefix(cfg.BaseURL, "https://")

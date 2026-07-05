@@ -4,6 +4,7 @@ use (
 	./apps/brainz
 	./apps/hub/backend
 	./apps/fs
+	./packages/downloader
 	./packages/logger
 	./packages/musicbrainz-client
 	./packages/validation

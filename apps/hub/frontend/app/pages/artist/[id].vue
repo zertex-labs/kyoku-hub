@@ -83,6 +83,26 @@ const sortedTypes = computed(() =>
 const badModalRg = ref<ReleaseGroup | null>(null);
 
 // SSE: real-time updates for this artist
+// Download state: rg_id -> phase string or null
+const downloadState = ref<Map<string, string>>(new Map());
+
+async function downloadReleaseGroup(rg: ReleaseGroup) {
+  if (downloadState.value.get(rg.mb_release_group_id)) return;
+  const artistName = artist.value?.name ?? "";
+  downloadState.value = new Map([...downloadState.value, [rg.mb_release_group_id, "queued"]]);
+  try {
+    await $fetch(`${apiBase}/api/download/rg/${rg.mb_release_group_id}`, {
+      method: "POST",
+      credentials: "include",
+      body: { title: rg.title, artist_name: artistName },
+    });
+  } catch {
+    downloadState.value = new Map(
+      [...downloadState.value].filter(([k]) => k !== rg.mb_release_group_id),
+    );
+  }
+}
+
 const { on, off } = useSSE();
 
 function handleArtistUpdated(data: any) {
@@ -100,12 +120,27 @@ function handleFsSynced() {
   refreshReleaseGroups();
 }
 
+function handleDownloadProgress(data: any) {
+  const rgId = data.rg_id as string;
+  if (!rgId) return;
+  if (data.phase === "complete" || data.phase === "error") {
+    downloadState.value = new Map(
+      [...downloadState.value].filter(([k]) => k !== rgId),
+    );
+    if (data.phase === "complete") refreshReleaseGroups();
+  } else {
+    downloadState.value = new Map([...downloadState.value, [rgId, data.phase as string]]);
+  }
+}
+
 on("artist:updated", handleArtistUpdated);
 on("fs:synced", handleFsSynced);
+on("download:progress", handleDownloadProgress);
 
 onUnmounted(() => {
   off("artist:updated", handleArtistUpdated);
   off("fs:synced", handleFsSynced);
+  off("download:progress", handleDownloadProgress);
 });
 </script>
 
@@ -223,30 +258,51 @@ onUnmounted(() => {
                 <p class="text-[11px] text-gray-500">
                   {{ rg.first_release_date?.slice(0, 4) || "—" }}
                 </p>
-                <component
-                  :is="rg.fs_state === 'BAD' ? 'button' : 'span'"
-                  v-if="rg.fs_state"
-                  class="text-[10px] font-semibold px-1 py-0.5 rounded"
-                  :class="{
-                    'bg-green-500/20 text-green-400': rg.fs_state === 'PERFECT',
-                    'bg-yellow-500/20 text-yellow-400': rg.fs_state === 'MB_MISS',
-                    'bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer':
-                      rg.fs_state === 'BAD',
-                    'bg-white/5 text-gray-600': rg.fs_state === 'MISSING',
-                  }"
-                  :title="rg.fs_state"
-                  @click.prevent="rg.fs_state === 'BAD' && (badModalRg = rg)"
-                >
-                  {{
-                    rg.fs_state === "PERFECT"
-                      ? "✓"
-                      : rg.fs_state === "MB_MISS"
-                        ? "MB?"
-                        : rg.fs_state === "BAD"
-                          ? "!"
-                          : "–"
-                  }}
-                </component>
+                <div class="flex items-center gap-1">
+                  <!-- Download button: show when MISSING and not already downloading -->
+                  <template v-if="rg.fs_state === 'MISSING'">
+                    <button
+                      v-if="!downloadState.get(rg.mb_release_group_id)"
+                      class="text-[10px] px-1 py-0.5 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                      title="Download from Tidal"
+                      @click.prevent="downloadReleaseGroup(rg)"
+                    >
+                      <Icon name="lucide:download" class="w-3 h-3" />
+                    </button>
+                    <span
+                      v-else
+                      class="text-[10px] px-1 py-0.5 rounded bg-orange-500/10 text-orange-400 capitalize"
+                      :title="downloadState.get(rg.mb_release_group_id)"
+                    >
+                      <Icon name="lucide:loader-circle" class="w-3 h-3 animate-spin" />
+                    </span>
+                  </template>
+
+                  <component
+                    :is="rg.fs_state === 'BAD' ? 'button' : 'span'"
+                    v-if="rg.fs_state"
+                    class="text-[10px] font-semibold px-1 py-0.5 rounded"
+                    :class="{
+                      'bg-green-500/20 text-green-400': rg.fs_state === 'PERFECT',
+                      'bg-yellow-500/20 text-yellow-400': rg.fs_state === 'MB_MISS',
+                      'bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer':
+                        rg.fs_state === 'BAD',
+                      'bg-white/5 text-gray-600': rg.fs_state === 'MISSING',
+                    }"
+                    :title="rg.fs_state"
+                    @click.prevent="rg.fs_state === 'BAD' && (badModalRg = rg)"
+                  >
+                    {{
+                      rg.fs_state === "PERFECT"
+                        ? "✓"
+                        : rg.fs_state === "MB_MISS"
+                          ? "MB?"
+                          : rg.fs_state === "BAD"
+                            ? "!"
+                            : "–"
+                    }}
+                  </component>
+                </div>
               </div>
             </div>
           </div>
