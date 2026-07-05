@@ -405,6 +405,34 @@ func (m *Manager) RequestSync(userID string, full bool) int {
 	return sent
 }
 
+// RequestSyncAgent sends a SyncRequest to a single specific agent.
+// Returns false if the agent is not connected or the send fails.
+func (m *Manager) RequestSyncAgent(userID, agentID string, full bool) bool {
+	m.mu.RLock()
+	agents, ok := m.conns[userID]
+	if !ok {
+		m.mu.RUnlock()
+		return false
+	}
+	c, ok := agents[agentID]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	err := c.sendProto(&fspb.Envelope{
+		Payload: &fspb.Envelope_SyncRequest{
+			SyncRequest: &fspb.SyncRequest{Full: full},
+		},
+	})
+	if err != nil {
+		m.logger.Warn("failed to send sync request to agent",
+			zap.String("agent_id", agentID),
+			zap.Error(err),
+		)
+	}
+	return err == nil
+}
+
 // IsConnected reports whether the given agent currently has a live WS connection.
 func (m *Manager) IsConnected(userID, agentID string) bool {
 	m.mu.RLock()

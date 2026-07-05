@@ -9,9 +9,22 @@ const titleParam = (route.query.title as string) ?? "";
 const artistParam = (route.query.artist as string) ?? "";
 const searchQuery = [artistParam, titleParam].filter(Boolean).join(" ");
 
-const { data: results, status } = await useFetch<SearchResult[]>(
-  `${apiBase}/api/download/rg/${rgId}/search`,
-  { query: { q: searchQuery }, credentials: "include" },
+// Fetch search results and connected agents in parallel
+const [{ data: results, status }, { data: agentsRaw }] = await Promise.all([
+  useFetch<SearchResult[]>(`${apiBase}/api/download/rg/${rgId}/search`, {
+    query: { q: searchQuery },
+    credentials: "include",
+  }),
+  useFetch<{ id: string; label: string; connected: boolean }[]>(`${apiBase}/api/agent/list`, {
+    credentials: "include",
+  }),
+]);
+
+const connectedAgents = computed(() => (agentsRaw.value ?? []).filter((a) => a.connected));
+
+// Auto-select the only connected agent if there's exactly one
+const selectedAgentId = ref<string | null>(
+  connectedAgents.value.length === 1 ? connectedAgents.value[0].id : null,
 );
 
 const byProvider = computed(() => {
@@ -35,7 +48,11 @@ async function startDownload(result: SearchResult) {
     await $fetch(`${apiBase}/api/download/rg/${rgId}`, {
       method: "POST",
       credentials: "include",
-      body: { provider: result.provider, album_id: result.id },
+      body: {
+        provider: result.provider,
+        album_id: result.id,
+        agent_id: selectedAgentId.value ?? undefined,
+      },
     });
   } catch {
     activeDownload.value = null;
@@ -80,6 +97,44 @@ onUnmounted(() => off("download:progress", handleProgress));
       </p>
     </div>
 
+    <!-- Agent picker (only when multiple connected) -->
+    <div v-if="connectedAgents.length > 0" class="mb-6">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+        Download destination
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          v-for="agent in connectedAgents"
+          :key="agent.id"
+          class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
+          :class="
+            selectedAgentId === agent.id
+              ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
+              : 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
+          "
+          @click="selectedAgentId = agent.id"
+        >
+          <span
+            class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+            :class="selectedAgentId === agent.id ? 'bg-orange-400' : 'bg-green-400'"
+          />
+          {{ agent.label }}
+        </button>
+        <button
+          v-if="connectedAgents.length > 1"
+          class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
+          :class="
+            selectedAgentId === null
+              ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
+              : 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
+          "
+          @click="selectedAgentId = null"
+        >
+          All agents
+        </button>
+      </div>
+    </div>
+
     <!-- Loading -->
     <div v-if="status === 'pending'" class="space-y-6">
       <div class="h-3 w-16 bg-white/5 rounded animate-pulse" />
@@ -104,9 +159,10 @@ onUnmounted(() => off("download:progress", handleProgress));
     </p>
 
     <!-- Empty -->
-    <p v-else-if="!results?.length" class="text-sm text-gray-500">
-      No results found for "{{ searchQuery }}".
-    </p>
+    <div v-else-if="!results?.length" class="text-sm text-gray-500 space-y-1">
+      <p>No results found for "{{ searchQuery }}".</p>
+      <p class="text-xs text-gray-600">Check the hub backend logs for Tidal API errors.</p>
+    </div>
 
     <!-- Results by provider -->
     <div v-else class="space-y-8">

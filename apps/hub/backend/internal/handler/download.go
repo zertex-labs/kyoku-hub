@@ -73,11 +73,12 @@ func (h *DownloadHandler) SearchProviders(c echo.Context) error {
 	for range h.providers {
 		r := <-ch
 		if r.err != nil {
-			h.logger.Warn("provider search error", zap.Error(r.err))
+			h.logger.Warn("provider search error", zap.String("q", q), zap.Error(r.err))
 			continue
 		}
 		all = append(all, r.results...)
 	}
+	h.logger.Info("search complete", zap.String("q", q), zap.Int("results", len(all)))
 
 	if all == nil {
 		all = []downloader.SearchResult{}
@@ -88,6 +89,7 @@ func (h *DownloadHandler) SearchProviders(c echo.Context) error {
 type downloadRGRequest struct {
 	Provider string `json:"provider"`
 	AlbumID  string `json:"album_id"`
+	AgentID  string `json:"agent_id,omitempty"`
 }
 
 func (h *DownloadHandler) DownloadReleaseGroup(c echo.Context) error {
@@ -104,11 +106,11 @@ func (h *DownloadHandler) DownloadReleaseGroup(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "provider not configured: " + req.Provider})
 	}
 
-	go h.runDownload(rgID, p, req.AlbumID, user.ID)
+	go h.runDownload(rgID, p, req.AlbumID, user.ID, req.AgentID)
 	return c.JSON(http.StatusAccepted, map[string]string{"status": "queued"})
 }
 
-func (h *DownloadHandler) runDownload(rgID string, p downloader.Provider, albumID, userID string) {
+func (h *DownloadHandler) runDownload(rgID string, p downloader.Provider, albumID, userID, agentID string) {
 	destDir := filepath.Join(h.downloadDir, rgID, albumID)
 
 	broadcast := func(phase string, track, total int) {
@@ -133,5 +135,10 @@ func (h *DownloadHandler) runDownload(rgID string, p downloader.Provider, albumI
 		return
 	}
 
-	h.agentManager.RequestSync(userID, false)
+	h.logger.Info("download complete", zap.String("rg_id", rgID), zap.String("agent_id", agentID))
+	if agentID != "" {
+		h.agentManager.RequestSyncAgent(userID, agentID, false)
+	} else {
+		h.agentManager.RequestSync(userID, false)
+	}
 }
