@@ -129,10 +129,10 @@ func main() {
 	fsSyncHandler := handler.NewFsSyncHandler(q, agentManager)
 	fsSyncHandler.Register(e.Group("/api/fs"))
 
-	// Downloader (Tidal) — optional; handler returns 503 when not configured
-	var tidalProvider *tidal.Tidal
+	// Downloader — optional; handler returns 503 when no providers configured
+	providers := map[string]downloader.Provider{}
 	if cfg.TidalToken != "" {
-		tidalProvider = tidal.New(tidal.Auth{
+		providers["tidal"] = tidal.New(tidal.Auth{
 			Token:        cfg.TidalToken,
 			RefreshToken: cfg.TidalRefreshToken,
 			CountryCode:  cfg.TidalCountryCode,
@@ -141,7 +141,7 @@ func main() {
 		}, downloader.DefaultConfig())
 		log.Info("tidal downloader configured")
 	}
-	downloadHandler := handler.NewDownloadHandler(sseManager, tidalProvider, cfg.DownloadDir, q, agentManager, log)
+	downloadHandler := handler.NewDownloadHandler(sseManager, providers, cfg.DownloadDir, q, agentManager, log)
 	downloadHandler.Register(e.Group("/api/download"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
