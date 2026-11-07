@@ -317,9 +317,19 @@ func (p Plugin) execDescribe(ctx context.Context) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, filepath.Join(p.dir, p.Executable), "--describe")
+	tempDir, err := os.MkdirTemp("", "kyoku-describe-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tempDir)
+
+	spec := SpecFor(p.dir, p.dir, tempDir, false)
+	cmd, err := SandboxedCommand(ctx, spec, filepath.Join(p.dir, p.Executable), "--describe")
+	if err != nil {
+		return nil, err
+	}
 	cmd.Dir = p.dir
-	isolateProcess(cmd)
+	cmd.Env = []string{"HOME=" + tempDir, "TMPDIR=" + tempDir, "PATH=/usr/bin:/bin"}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -461,16 +471,30 @@ func (r *Registry) run(ctx context.Context, pl Plugin, p api.Payload) download.O
 	cctx, cancel := context.WithTimeout(ctx, pl.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cctx, filepath.Join(pl.dir, pl.Executable))
+	if len(pl.Permissions.Net) > 0 {
+		// Network plugins would have to be proxied through the hub to honour an
+		// allowlist. Until that exists, refusing is the honest answer.
+		return download.Outcome{Err: errors.New("network permissions are not supported yet")}
+	}
+
+	tempDir, err := os.MkdirTemp("", "kyoku-plugin-")
+	if err != nil {
+		return download.Outcome{Err: fmt.Errorf("temp dir: %w", err)}
+	}
+	defer os.RemoveAll(tempDir)
+
+	spec := SpecFor(pl.dir, p.Album.Dir, tempDir, false)
+	cmd, err := SandboxedCommand(cctx, spec, filepath.Join(pl.dir, pl.Executable))
+	if err != nil {
+		return download.Outcome{Err: err}
+	}
 	cmd.Dir = p.Album.Dir // plugins work relative to the album, never the hub
 	cmd.Stdin = bytes.NewReader(body)
-	// PATH is empty on purpose: a plugin runs the binaries it declared in
-	// permissions.exec, not whatever happens to be resolvable.
 	cmd.Env = []string{
-		"HOME=" + os.Getenv("HOME"),
+		"HOME=" + tempDir,
+		"TMPDIR=" + tempDir,
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 	}
-	isolateProcess(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

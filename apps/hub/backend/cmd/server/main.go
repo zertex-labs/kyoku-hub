@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
@@ -26,6 +28,20 @@ import (
 )
 
 func main() {
+	// The hub re-execs itself as the plugin launcher: it confines the child and
+	// then becomes the plugin, so the ruleset is inherited and cannot be undone.
+	if len(os.Args) > 3 && os.Args[1] == plugins.SandboxFlag {
+		argv := os.Args[3:]
+		if argv[0] == "--" { // tolerate an explicit separator on the command line
+			argv = argv[1:]
+		}
+		if err := plugins.RunSandboxed(os.Args[2], argv); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	_ = godotenv.Load()
 
 	log := logger.New("hub")
