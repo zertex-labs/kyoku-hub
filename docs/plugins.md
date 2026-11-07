@@ -9,6 +9,11 @@ Plugins are installed **by hand**: copy a directory into `$PLUGINS_DIR`
 endpoint, deliberately — installing a plugin is granting code access to the
 server, so it should require access to the server.
 
+A freshly copied plugin is **disabled**. It appears in Settings → Plugins with
+its declared permissions, and runs only once it is switched on there. That toggle
+is the consent step: what it may touch is visible on the same screen, before it
+ever runs.
+
     ~/.config/kyoku/plugins/replaygain/
       plugin.yaml     # what it is, which hooks it serves, what it may touch
       replaygain      # a compiled Go binary
@@ -147,9 +152,19 @@ What this does *not* do: it does not restrict *which* programs run — Landlock
 scopes file and network access, so a plugin can execute anything it can see, but
 only inside those rules. Treat a plugin as code you chose to install.
 
+## Pages
+
+- **Settings → Plugins** — every installed plugin: ID, description, version,
+  enabled toggle, last change. Disabled plugins are listed but never dispatched.
+- **/plugins/:id** — status toggle, plugin information (author, hooks, declared
+  permissions), the manifest verbatim, and the configuration form generated from
+  it.
+
 ## Configuration API
 
     GET  /api/plugins                installed plugins, fields, masked values
+    GET  /api/plugins/:id            one plugin, including its manifest
+    PUT  /api/plugins/:id            {"enabled": true|false}
     GET  /api/plugins/:id/config     fields + values
     PUT  /api/plugins/:id/config     validate, encrypt, store
 

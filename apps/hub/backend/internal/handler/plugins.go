@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -32,8 +33,10 @@ func NewPluginHandler(reg *plugins.Registry, store *plugins.Store, mgr *download
 
 func (h *PluginHandler) Register(g *echo.Group) {
 	g.GET("", h.List, mw.AuthRequired(h.queries))
+	g.GET("/:id", h.Get, mw.AuthRequired(h.queries))
 	g.GET("/:id/config", h.GetConfig, mw.AuthRequired(h.queries))
 	g.PUT("/:id/config", h.PutConfig, mw.AuthRequired(h.queries))
+	g.PUT("/:id", h.SetEnabled, mw.AuthRequired(h.queries))
 	g.POST("/reload", h.Reload, mw.AuthRequired(h.queries))
 }
 
@@ -50,6 +53,48 @@ type pluginView struct {
 	Permissions plugins.Permissions `json:"permissions"`
 	Config      []plugins.Field     `json:"config"`
 	Values      map[string]any      `json:"values"`
+	Enabled     bool                `json:"enabled"`
+	UpdatedAt   string              `json:"updated_at"`
+	Manifest    string              `json:"manifest"`
+}
+
+func (h *PluginHandler) view(ctx context.Context, p plugins.Plugin) pluginView {
+	values, err := h.valuesFor(ctx, p)
+	if err != nil {
+		values = map[string]any{}
+	}
+	return pluginView{
+		ID:          p.Name,
+		Name:        p.Name,
+		Version:     p.Version,
+		Author:      p.Author,
+		Description: p.Description,
+		Hooks:       p.Hooks,
+		Required:    p.Required,
+		Permissions: p.Permissions,
+		Config:      p.Config,
+		Values:      maskSecrets(p.Config, values),
+		Enabled:     h.registry.Enabled(p.Name),
+		UpdatedAt:   formatWhen(h.registry.UpdatedAt(p.Name)),
+		Manifest:    p.ManifestYAML(),
+	}
+}
+
+// formatWhen renders a timestamp, or nothing at all when the plugin has never
+// been toggled: a zero time prints as 1/1/1 in the browser.
+func formatWhen(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func (h *PluginHandler) Get(c echo.Context) error {
+	p, err := h.find(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, h.view(c.Request().Context(), p))
 }
 
 func (h *PluginHandler) List(c echo.Context) error {
@@ -58,22 +103,9 @@ func (h *PluginHandler) List(c echo.Context) error {
 	}
 	views := make([]pluginView, 0, h.registry.Count())
 	for _, p := range h.registry.Plugins() {
-		values, err := h.valuesFor(c.Request().Context(), p)
-		if err != nil {
-			values = map[string]any{}
-		}
-		views = append(views, pluginView{
-			ID:          p.Name,
-			Name:        p.Name,
-			Version:     p.Version,
-			Author:      p.Author,
-			Description: p.Description,
-			Hooks:       p.Hooks,
-			Required:    p.Required,
-			Permissions: p.Permissions,
-			Config:      p.Config,
-			Values:      maskSecrets(p.Config, values),
-		})
+		v := h.view(c.Request().Context(), p)
+		v.Manifest = "" // the list does not carry the manifest
+		views = append(views, v)
 	}
 	return c.JSON(http.StatusOK, views)
 }
@@ -117,6 +149,25 @@ func (h *PluginHandler) PutConfig(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"values": maskSecrets(p.Config, values)})
+}
+
+// SetEnabled is the consent step: a plugin runs only after it is switched on
+// here, which is also where its declared permissions are visible.
+func (h *PluginHandler) SetEnabled(c echo.Context) error {
+	p, err := h.find(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(c.Request().Body).Decode(&body); err != nil || body.Enabled == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "enabled is required"})
+	}
+	if err := h.registry.SetEnabled(c.Request().Context(), p.Name, *body.Enabled); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"id": p.Name, "enabled": *body.Enabled})
 }
 
 // Reload re-reads the plugins directory so a newly dropped plugin appears

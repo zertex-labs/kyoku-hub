@@ -240,47 +240,27 @@ watch(
 );
 
 // ── plugins ──────────────────────────────────────────────────────────────────
-// A plugin is installed by dropping a directory on the server; this page only
-// configures what is already there, and never uploads anything.
-type PluginField = {
-  key: string
-  type: "string" | "secret" | "bool" | "int" | "select"
-  label: string
-  help?: string
-  default?: unknown
-  options?: string[]
-  min?: number | null
-  max?: number | null
-  required?: boolean
-}
-type PluginView = {
+// A plugin is installed by dropping a directory on the server; this list only
+// shows what is there and whether it is allowed to run.
+type PluginRow = {
   id: string
   version: string
-  author: string
   description: string
   hooks: string[]
-  required: boolean
-  permissions: { exec?: string[] | null; net?: string[] | null }
-  config: PluginField[]
-  values: Record<string, unknown>
+  enabled: boolean
+  updated_at: string
 }
 
-const plugins = ref<PluginView[]>([])
+const plugins = ref<PluginRow[]>([])
 const pluginsLoading = ref(false)
-const pluginDraft = ref<Record<string, Record<string, unknown>>>({})
-const pluginSaving = ref<string | null>(null)
-const pluginSaved = ref<Record<string, boolean>>({})
 const pluginError = ref<string | null>(null)
+const pluginBusy = ref<string | null>(null)
 
 async function loadPlugins() {
   pluginsLoading.value = true
   pluginError.value = null
   try {
-    const data = await $fetch<PluginView[]>(`${apiBase}/api/plugins`, { credentials: "include" })
-    plugins.value = data ?? []
-    const drafts: Record<string, Record<string, unknown>> = {}
-    for (const p of plugins.value) drafts[p.id] = { ...p.values }
-    pluginDraft.value = drafts
+    plugins.value = (await $fetch<PluginRow[]>(`${apiBase}/api/plugins`, { credentials: "include" })) ?? []
   } catch (e: any) {
     pluginError.value = e?.data?.error ?? "could not load plugins"
   } finally {
@@ -288,27 +268,26 @@ async function loadPlugins() {
   }
 }
 
-async function savePlugin(id: string) {
-  pluginSaving.value = id
+async function togglePlugin(row: PluginRow) {
+  pluginBusy.value = row.id
   pluginError.value = null
   try {
-    const body = { ...pluginDraft.value[id] }
-    // A blank secret means "leave what is stored": the API never sent it back.
-    for (const f of plugins.value.find((p) => p.id === id)?.config ?? []) {
-      if (f.type === "secret" && !body[f.key]) delete body[f.key]
-    }
-    const res = await $fetch<{ values: Record<string, unknown> }>(
-      `${apiBase}/api/plugins/${id}/config`,
-      { method: "PUT", credentials: "include", body },
-    )
-    pluginDraft.value[id] = { ...res.values }
-    pluginSaved.value[id] = true
-    setTimeout(() => (pluginSaved.value[id] = false), 2000)
+    const next = !row.enabled
+    await $fetch(`${apiBase}/api/plugins/${row.id}`, {
+      method: "PUT",
+      credentials: "include",
+      body: { enabled: next },
+    })
+    row.enabled = next
   } catch (e: any) {
-    pluginError.value = e?.data?.error ?? "could not save plugin config"
+    pluginError.value = e?.data?.error ?? "could not change plugin state"
   } finally {
-    pluginSaving.value = null
+    pluginBusy.value = null
   }
+}
+
+function openPlugin(id: string) {
+  router.push(`/plugins/${id}`)
 }
 
 if (import.meta.client) loadPlugins()
@@ -614,8 +593,8 @@ if (import.meta.client) loadPlugins()
           <h2 class="text-lg font-semibold text-white mb-1">Plugins</h2>
           <p class="text-sm text-gray-500 mb-6">
             Post-download steps installed on this server. Drop a plugin directory into
-            <code class="text-orange-300">~/.config/kyoku/plugins</code> and restart the hub; each
-            runs as a separate process, confined to the album it is working on.
+            <code class="text-orange-300">~/.config/kyoku/plugins</code> and restart the hub. A plugin
+            runs only once it is enabled here.
           </p>
 
           <div v-if="pluginsLoading" class="text-sm text-gray-500">Loading…</div>
@@ -627,116 +606,51 @@ if (import.meta.client) loadPlugins()
             No plugins installed.
           </div>
 
-          <div v-else class="space-y-4">
+          <div v-else class="rounded-xl border border-white/10 overflow-hidden">
+            <!-- header -->
             <div
-              v-for="plugin in plugins"
-              :key="plugin.id"
-              class="rounded-xl border border-white/10 bg-white/[0.02] p-5"
+              class="grid grid-cols-[10rem_1fr_5rem_5rem_9rem] gap-4 px-4 py-2.5 text-[11px] uppercase tracking-wide text-gray-500 bg-white/[0.02] border-b border-white/5"
             >
-              <div class="flex items-start justify-between gap-4">
-                <div class="min-w-0">
-                  <p class="text-sm font-medium text-white">
-                    {{ plugin.id }}
-                    <span class="text-gray-600 font-normal text-xs">v{{ plugin.version }}</span>
-                    <span
-                      v-if="plugin.required"
-                      class="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-amber-400/25 bg-amber-400/10 text-amber-300"
-                      >required</span
-                    >
-                  </p>
-                  <p class="text-xs text-gray-500 mt-1">{{ plugin.description }}</p>
-                  <div class="flex flex-wrap gap-1.5 mt-2">
-                    <span
-                      v-for="hook in plugin.hooks"
-                      :key="hook"
-                      class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 font-mono"
-                      >{{ hook }}</span
-                    >
-                    <span
-                      v-for="bin in plugin.permissions.exec ?? []"
-                      :key="bin"
-                      class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-500 font-mono"
-                      title="May execute"
-                      >exec: {{ bin }}</span
-                    >
-                    <span
-                      v-for="host in plugin.permissions.net ?? []"
-                      :key="host"
-                      class="text-[10px] px-1.5 py-0.5 rounded border border-amber-400/25 bg-amber-400/10 text-amber-300 font-mono"
-                      title="May reach"
-                      >net: {{ host }}</span
-                    >
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="plugin.config.length" class="mt-4 space-y-3">
-                <div v-for="field in plugin.config" :key="field.key">
-                  <label class="block text-xs text-gray-400 mb-1">
-                    {{ field.label || field.key }}
-                    <span v-if="field.required" class="text-orange-400">*</span>
-                  </label>
-
-                  <select
-                    v-if="field.type === 'select'"
-                    v-model="pluginDraft[plugin.id][field.key]"
-                    class="w-full text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500/50"
-                  >
-                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-                  </select>
-
-                  <label
-                    v-else-if="field.type === 'bool'"
-                    class="inline-flex items-center gap-2 text-xs text-gray-300"
-                  >
-                    <input
-                      v-model="pluginDraft[plugin.id][field.key]"
-                      type="checkbox"
-                      class="accent-orange-500"
-                    />
-                    enabled
-                  </label>
-
-                  <input
-                    v-else-if="field.type === 'int'"
-                    v-model.number="pluginDraft[plugin.id][field.key]"
-                    type="number"
-                    :min="field.min ?? undefined"
-                    :max="field.max ?? undefined"
-                    class="w-full text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500/50"
-                  />
-
-                  <input
-                    v-else
-                    v-model="pluginDraft[plugin.id][field.key]"
-                    :type="field.type === 'secret' ? 'password' : 'text'"
-                    :placeholder="field.type === 'secret' ? 'unchanged' : ''"
-                    class="w-full text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50"
-                  />
-
-                  <p v-if="field.help" class="text-[11px] text-gray-600 mt-1">{{ field.help }}</p>
-                </div>
-
-                <div class="flex items-center gap-3 pt-1">
-                  <button
-                    :disabled="pluginSaving === plugin.id"
-                    class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors"
-                    @click="savePlugin(plugin.id)"
-                  >
-                    <Icon
-                      :name="pluginSaving === plugin.id ? 'lucide:loader-2' : 'lucide:check'"
-                      class="w-3.5 h-3.5"
-                      :class="{ 'animate-spin': pluginSaving === plugin.id }"
-                    />
-                    Save
-                  </button>
-                  <span v-if="pluginSaved[plugin.id]" class="text-xs text-green-400">Saved</span>
-                </div>
-              </div>
+              <span>ID</span>
+              <span>Description</span>
+              <span>Version</span>
+              <span>Enabled</span>
+              <span class="text-right">Updated</span>
             </div>
 
-            <p v-if="pluginError" class="text-xs text-red-400">{{ pluginError }}</p>
+            <!-- rows -->
+            <button
+              v-for="row in plugins"
+              :key="row.id"
+              class="w-full text-left grid grid-cols-[10rem_1fr_5rem_5rem_9rem] gap-4 px-4 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.04] transition-colors"
+              @click="openPlugin(row.id)"
+            >
+              <span class="text-sm text-white font-mono truncate">{{ row.id }}</span>
+              <span class="text-sm text-gray-400">{{ row.description }}</span>
+              <span class="text-xs text-gray-400">{{ row.version }}</span>
+              <span class="flex items-center">
+                <button
+                  :disabled="pluginBusy === row.id"
+                  class="relative w-9 h-5 rounded-full transition-colors disabled:opacity-50 shrink-0"
+                  :class="row.enabled ? 'bg-orange-500' : 'bg-white/15'"
+                  role="switch"
+                  :aria-checked="row.enabled"
+                  :title="row.enabled ? 'Disable' : 'Enable'"
+                  @click.stop="togglePlugin(row)"
+                >
+                  <span
+                    class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                    :class="row.enabled ? 'left-[1.125rem]' : 'left-0.5'"
+                  />
+                </button>
+              </span>
+              <span class="text-xs text-gray-500 text-right">
+                {{ row.updated_at ? new Date(row.updated_at).toLocaleDateString() : "—" }}
+              </span>
+            </button>
           </div>
+
+          <p v-if="pluginError" class="text-xs text-red-400 mt-3">{{ pluginError }}</p>
         </section>
       </div>
     </div>

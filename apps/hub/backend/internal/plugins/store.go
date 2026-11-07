@@ -27,6 +27,24 @@ func (s *Store) Values(ctx context.Context, pluginID string) (map[string]any, er
 	return s.box.Open(blob)
 }
 
+// PluginStates implements StateStore.
+func (s *Store) PluginStates(ctx context.Context) (map[string]State, error) {
+	rows, err := s.q.PluginStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]State, len(rows))
+	for id, r := range rows {
+		out[id] = State{Enabled: r.Enabled, UpdatedAt: r.UpdatedAt}
+	}
+	return out, nil
+}
+
+// SetPluginEnabled implements StateStore.
+func (s *Store) SetPluginEnabled(ctx context.Context, pluginID string, enabled bool) error {
+	return s.q.SetPluginEnabled(ctx, pluginID, enabled)
+}
+
 // Save encrypts and stores the configuration for a plugin.
 func (s *Store) Save(ctx context.Context, pluginID string, values map[string]any) error {
 	blob, err := s.box.Seal(values)

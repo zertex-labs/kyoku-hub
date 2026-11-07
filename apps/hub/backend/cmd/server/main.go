@@ -163,15 +163,17 @@ func main() {
 	// hub that cannot protect it should not offer the feature at all.
 	var pluginStoreConcrete *plugins.Store
 	var pluginStore plugins.ConfigStore
+	var pluginStates plugins.StateStore
 	if box, err := plugins.NewSecretBox(cfg.SessionSecret); err != nil {
 		log.Warn("plugin config disabled", zap.Error(err))
 	} else {
 		pluginStoreConcrete = plugins.NewStore(q, box)
 		pluginStore = pluginStoreConcrete
+		pluginStates = pluginStoreConcrete
 	}
 
 	var pluginRegistry *plugins.Registry
-	if registry, err := plugins.NewRegistry(cfg.PluginsDir, pluginStore, appInfo, log); err != nil {
+	if registry, err := plugins.NewRegistry(cfg.PluginsDir, pluginStore, pluginStates, appInfo, log); err != nil {
 		log.Warn("plugins not loaded", zap.String("dir", cfg.PluginsDir), zap.Error(err))
 	} else {
 		pluginRegistry = registry

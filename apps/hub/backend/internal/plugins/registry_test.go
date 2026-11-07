@@ -177,11 +177,22 @@ func binFromRepo(t *testing.T) string {
 	return filepath.Join(root, "examples", "plugins", "hello")
 }
 
+// enableAll mirrors the admin switching every plugin on; nothing dispatches
+// before that.
+func enableAll(t *testing.T, reg *Registry) {
+	t.Helper()
+	for _, name := range reg.Names() {
+		if err := reg.SetEnabled(context.Background(), name, true); err != nil {
+			t.Fatalf("enable %s: %v", name, err)
+		}
+	}
+}
+
 func TestDescribeGateRejectsForeignBinaries(t *testing.T) {
 	root := t.TempDir()
 	dir := writeDir(t, root, "probe", minimalManifest, "\x7fELF not really")
 
-	reg, err := NewRegistry(root, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
+	reg, err := NewRegistry(root, nil, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -195,13 +206,17 @@ func TestDescribeGateRejectsForeignBinaries(t *testing.T) {
 func TestDispatchRunsARealPlugin(t *testing.T) {
 	root := installHello(t)
 
-	reg, err := NewRegistry(root, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
+	reg, err := NewRegistry(root, nil, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
 	if reg.Count() != 1 {
 		t.Fatalf("plugins = %d", reg.Count())
 	}
+	if reg.Enabled("hello") {
+		t.Fatal("a freshly installed plugin must not be enabled")
+	}
+	enableAll(t, reg)
 
 	albumDir := t.TempDir()
 	payload := download.Payload{
@@ -220,10 +235,11 @@ func TestDispatchRunsARealPlugin(t *testing.T) {
 
 func TestDispatchPublishesFilesAPluginAdds(t *testing.T) {
 	root := installHello(t)
-	reg, err := NewRegistry(root, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
+	reg, err := NewRegistry(root, nil, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
+	enableAll(t, reg)
 
 	albumDir := t.TempDir()
 	out := reg.Dispatch(context.Background(), download.HookAlbumBeforePublish, download.Payload{
@@ -240,10 +256,11 @@ func TestDispatchPublishesFilesAPluginAdds(t *testing.T) {
 
 func TestDispatchOnlyRunsSubscribedHooksAndExtensions(t *testing.T) {
 	root := installHello(t)
-	reg, err := NewRegistry(root, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
+	reg, err := NewRegistry(root, nil, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
+	enableAll(t, reg)
 
 	out := reg.Dispatch(context.Background(), download.HookAlbumPublished, download.Payload{})
 	if len(out) != 0 {
@@ -301,5 +318,30 @@ hooks: [album.published]
 	pl := Plugin{Manifest: Manifest{Name: "probe", Executable: "./plugin", Hooks: []string{"album.published"}, dir: dir, timeout: time.Second}}
 	if _, err := pl.Describe(context.Background()); err == nil {
 		t.Fatal("expected describe to fail for a non-plugin binary")
+	}
+}
+
+// A plugin that is installed but not enabled must not be dispatched: that switch
+// is the consent step.
+func TestDisabledPluginIsNotDispatched(t *testing.T) {
+	root := installHello(t)
+	reg, err := NewRegistry(root, nil, nil, api.App{Name: "kyoku-hub", Version: "test"}, nil)
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+
+	payload := download.Payload{
+		Album: download.Album{Dir: t.TempDir(), TrackCount: 1},
+		Track: &download.Track{Ext: ".flac", Title: "One More Time", Number: 1},
+	}
+	if out := reg.Dispatch(context.Background(), download.HookTrackTagged, payload); len(out) != 0 {
+		t.Fatalf("disabled plugin ran: %+v", out)
+	}
+
+	if err := reg.SetEnabled(context.Background(), "hello", true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if out := reg.Dispatch(context.Background(), download.HookTrackTagged, payload); len(out) != 1 {
+		t.Fatalf("enabled plugin did not run: %+v", out)
 	}
 }

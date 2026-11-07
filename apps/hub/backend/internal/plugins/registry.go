@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -97,17 +98,36 @@ type ConfigStore interface {
 	Values(ctx context.Context, pluginID string) (map[string]any, error)
 }
 
+// State is what the plugins table shows: whether a plugin was enabled by the
+// admin, and when that changed.
+type State struct {
+	Enabled   bool
+	UpdatedAt time.Time
+}
+
+// StateStore persists enable/disable. A plugin is disabled until it is enabled:
+// dropping a directory on the server is not the same as consenting to run it.
+type StateStore interface {
+	PluginStates(ctx context.Context) (map[string]State, error)
+	SetPluginEnabled(ctx context.Context, pluginID string, enabled bool) error
+}
+
 // Registry is the installed plugin set.
 type Registry struct {
 	plugins []Plugin
 	log     *zap.Logger
 	store   ConfigStore
+	states  StateStore
 	app     api.App
+
+	mu      sync.RWMutex
+	enabled map[string]bool
+	updated map[string]time.Time
 }
 
 // NewRegistry scans the plugins directory. A missing directory is not an error:
 // most installs have none.
-func NewRegistry(root string, store ConfigStore, app api.App, log *zap.Logger) (*Registry, error) {
+func NewRegistry(root string, store ConfigStore, states StateStore, app api.App, log *zap.Logger) (*Registry, error) {
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -133,7 +153,12 @@ func NewRegistry(root string, store ConfigStore, app api.App, log *zap.Logger) (
 		}
 		ok = append(ok, pl)
 	}
-	return &Registry{plugins: ok, log: log, store: store, app: app}, nil
+	reg := &Registry{
+		plugins: ok, log: log, store: store, states: states, app: app,
+		enabled: map[string]bool{}, updated: map[string]time.Time{},
+	}
+	reg.loadStates(ctx)
+	return reg, nil
 }
 
 // Load reads and validates every plugin directory under root.
@@ -337,6 +362,16 @@ func rejectShellScript(path string) error {
 	return nil
 }
 
+// ManifestYAML is the plugin's manifest as it sits on disk, shown verbatim in the
+// detail page so the declared permissions can be read without opening a shell.
+func (p Plugin) ManifestYAML() string {
+	raw, err := os.ReadFile(p.path)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // Describe runs the binary's --describe and verifies it against the manifest, so
 // a plugin is validated before it is ever dispatched anything.
 func (p Plugin) Describe(ctx context.Context) (api.Describe, error) {
@@ -397,6 +432,62 @@ func (p Plugin) execDescribe(ctx context.Context) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
+// loadStates reads the persisted enable flags. A plugin with no row is disabled:
+// installed is not the same as approved to run.
+func (r *Registry) loadStates(ctx context.Context) {
+	if r.states == nil {
+		return
+	}
+	states, err := r.states.PluginStates(ctx)
+	if err != nil {
+		r.log.Warn("plugin state unreadable", zap.Error(err))
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, s := range states {
+		r.enabled[id] = s.Enabled
+		r.updated[id] = s.UpdatedAt
+	}
+}
+
+// Enabled reports whether a plugin is switched on.
+func (r *Registry) Enabled(id string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.enabled[id]
+}
+
+func (r *Registry) UpdatedAt(id string) time.Time {
+	if r == nil {
+		return time.Time{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.updated[id]
+}
+
+// SetEnabled flips a plugin on or off, persisting the decision and applying it to
+// the next dispatch without a restart.
+func (r *Registry) SetEnabled(ctx context.Context, id string, enabled bool) error {
+	if r == nil {
+		return fmt.Errorf("no plugins installed")
+	}
+	if r.states != nil {
+		if err := r.states.SetPluginEnabled(ctx, id, enabled); err != nil {
+			return err
+		}
+	}
+	r.mu.Lock()
+	r.enabled[id] = enabled
+	r.updated[id] = time.Now()
+	r.mu.Unlock()
+	return nil
+}
+
 // Names lists installed plugins.
 func (r *Registry) Names() []string {
 	if r == nil {
@@ -445,7 +536,7 @@ func (r *Registry) Dispatch(ctx context.Context, hook download.Hook, p download.
 	}
 	var out []download.Outcome
 	for _, pl := range r.plugins {
-		if !pl.wants(hook) || !pl.handlesExt(p) {
+		if !pl.wants(hook) || !pl.handlesExt(p) || !r.Enabled(pl.Name) {
 			continue
 		}
 		payload := api.Payload{
