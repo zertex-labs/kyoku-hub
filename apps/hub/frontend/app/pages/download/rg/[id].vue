@@ -53,6 +53,15 @@ const { data: mbReleases } = await useFetch<MBRelease[]>(
 
 const chosenRelease = ref<string>("");
 
+// Where "open in MusicBrainz" goes: the edition once one is picked, the group
+// before that. Both are useful — the group is the album, the release is the
+// edition being tagged.
+const mbLink = computed(() =>
+  chosenRelease.value
+    ? `https://musicbrainz.org/release/${chosenRelease.value}`
+    : `https://musicbrainz.org/release-group/${rgId}`,
+);
+
 const connectedAgents = computed(() => (agentsRaw.value ?? []).filter((a) => a.connected));
 
 // Auto-select the only connected agent if there's exactly one
@@ -121,6 +130,17 @@ async function startDownload(result: SearchResult) {
             <p v-if="titleParam" class="text-sm text-gray-400 mt-1">
               {{ titleParam }}<span v-if="artistParam" class="text-gray-600"> · {{ artistParam }}</span>
             </p>
+
+            <a
+              v-if="rgId"
+              :href="mbLink"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-2 inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-orange-300 transition-colors"
+            >
+              <Icon name="lucide:external-link" class="w-3 h-3" />
+              Open in MusicBrainz
+            </a>
 
                 <div v-if="connectedAgents.length > 0" class="mt-5">
           <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
