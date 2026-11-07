@@ -1,0 +1,6 @@
+github.com/go-flac/flacvorbis v0.2.0 h1:KH0xjpkNTXFER4cszH4zeJxYcrHbUobz/RticWGOESs=
+github.com/go-flac/flacvorbis v0.2.0/go.mod h1:uIysHOtuU7OLGoCRG92bvnkg7QEqHx19qKRV6K1pBrI=
+github.com/go-flac/go-flac v1.0.0 h1:6qI9XOVLcO50xpzm3nXvO31BgDgHhnr/p/rER/K/doY=
+github.com/go-flac/go-flac v1.0.0/go.mod h1:WnZhcpmq4u1UdZMNn9LYSoASpWOCMOoxXxcWEHSzkW8=
+golang.org/x/crypto v0.50.0 h1:zO47/JPrL6vsNkINmLoo/PH1gcxpls50DNogFvB5ZGI=
+golang.org/x/crypto v0.50.0/go.mod h1:3muZ7vA7PBCE6xgPX7nkzzjiUq87kRItoJQM1Yo8S+Q=

@@ -13,9 +13,11 @@ type SearchResult struct {
 	Quality    string `json:"quality"`
 }
 
-type Config struct{}
+type Config struct {
+	Quality string // "FLAC", "MP3_320", "MP3_128"
+}
 
-func DefaultConfig() Config { return Config{} }
+func DefaultConfig() Config { return Config{Quality: "FLAC"} }
 
 type Provider interface {
 	SearchAlbum(q string) ([]SearchResult, error)
