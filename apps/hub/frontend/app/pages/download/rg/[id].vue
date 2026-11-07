@@ -150,8 +150,17 @@ async function startDownload(result: SearchResult) {
 
     <!-- Empty -->
     <div v-else-if="!results?.length" class="text-sm text-gray-500 space-y-1">
-      <p>No results found for "{{ searchQuery }}".</p>
-      <p class="text-xs text-gray-600">Check that a provider is connected in Settings → Connections.</p>
+      <p v-if="artistParam">
+        No releases by <span class="text-gray-300">{{ artistParam }}</span> found<span v-if="titleParam">
+          for "{{ titleParam }}"</span
+        >.
+      </p>
+      <p v-else>No results found for "{{ searchQuery }}".</p>
+      <p class="text-xs text-gray-600">
+        Deezer files some releases under their licensed title, so the album may be there under a
+        different name — but this artist itself came back empty, which usually means they are not
+        in the catalogue.
+      </p>
     </div>
 
     <!-- Results by provider -->

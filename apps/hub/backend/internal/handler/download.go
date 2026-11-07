@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strings"
@@ -100,10 +101,52 @@ func (h *DownloadHandler) Search(c echo.Context) error {
 	if artist != "" && !includeOthers {
 		all = rankResults(all, artist, title)
 	}
+
+	if len(all) == 0 && artist != "" && !includeOthers {
+		all = artistFallback(ctx, sources, artist, title, h.logger)
+	}
+
 	if all == nil {
 		all = []downloader.SearchResult{}
 	}
 	return c.JSON(http.StatusOK, all)
+}
+
+// artistFallback walks each source's discography for the artist itself.
+//
+// Needed because a catalogue keeps the licensed title, not the one on the cover:
+// Deezer files 三毒史 as "triviṣa-itihāsa" by "Sheena Ringo", so a search for the
+// Japanese pair returns an empty set for an album that is very much there.
+//
+// These results are deliberately NOT re-filtered by artist name: the source
+// matched the artist on its own terms, and comparing scripts lexically would
+// discard exactly what we came for.
+func artistFallback(
+	ctx context.Context,
+	sources map[string]downloader.Source,
+	artist, title string,
+	log *zap.Logger,
+) []downloader.SearchResult {
+	out := make([]downloader.SearchResult, 0, 20)
+	names := make([]string, 0, len(sources))
+	for name := range sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		src := sources[name]
+		as, ok := src.(downloader.ArtistSource)
+		if !ok {
+			continue
+		}
+		items, err := as.ArtistAlbums(ctx, artist, title)
+		if err != nil {
+			log.Warn("artist fallback failed", zap.String("artist", artist), zap.Error(err))
+			continue
+		}
+		out = append(out, items...)
+	}
+	return out
 }
 
 type startJobRequest struct {

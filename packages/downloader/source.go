@@ -38,3 +38,15 @@ type Source interface {
 type Prober interface {
 	ProbeAlbum(ctx context.Context, albumID string, ref AlbumRef, targets []QualityTarget) (AlbumCandidate, error)
 }
+
+// ArtistSource is an optional half of a Source: a provider that can list an
+// artist's albums.
+//
+// Provider search is one blob of text. When a catalogue stores an artist under a
+// different script, or an album under its original title — Deezer files 椎名林檎
+// as "Sheena Ringo" and 三毒史 as "triviṣa-itihāsa" — the query finds nothing
+// even though the release is right there. Walking the artist's discography is
+// the way back, and it is only needed when the direct search came up empty.
+type ArtistSource interface {
+	ArtistAlbums(ctx context.Context, artist, title string) ([]SearchResult, error)
+}

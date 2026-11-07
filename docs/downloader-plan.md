@@ -261,6 +261,15 @@ answer is an *estimate* until the bytes land:
              ground truth is `streamUrl?soundQuality=`, which will quietly hand back a
              lower tier.
 
+- [ ] **Search by catalogue title, not cover title.** A provider keeps the name it
+      was licensed under: Deezer files 椎名林檎 as "Sheena Ringo" and 三毒史 as
+      "triviṣa-itihāsa", so the exact pair returns zero results for an album that
+      is right there. When the direct search comes back empty, resolve the artist
+      and list their discography (`downloader.ArtistSource`), and do not re-filter
+      those by name — a lexical compare across scripts would throw away the hit.
+      Track counts are missing from Deezer's artist listing, so they are filled in
+      per album for the rows that will be shown (12 calls, ~2s, throttled).
+
 - [ ] **Probe per album, never per search result.** The probe costs N calls on Deezer,
       so it runs for the one album the user is about to download, after the click — not
       for the 10 covers on the search page. Cache by `(provider, album_id, account)` with
