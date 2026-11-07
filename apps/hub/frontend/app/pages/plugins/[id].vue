@@ -39,6 +39,19 @@ const saving = ref(false);
 const savedAt = ref(false);
 const toggling = ref(false);
 const error = ref<string | null>(null);
+// Which field has focus, so its label can float into the border.
+const focused = reactive<Record<string, boolean>>({});
+
+function hasValue(key: string): boolean {
+  const v = draft.value[key];
+  return v !== undefined && v !== null && v !== "";
+}
+
+// A label sits inside the field until it is focused or filled, then it shrinks
+// onto the border - the Material outline pattern, without a placeholder hack.
+function labelFloats(field: { key: string; type: string }): boolean {
+  return field.type === "select" || focused[field.key] || hasValue(field.key);
+}
 
 async function load() {
   loading.value = true;
@@ -216,44 +229,74 @@ await load();
           This plugin takes no configuration.
         </p>
 
-        <div v-else class="mt-4 space-y-4">
-          <div v-for="field in plugin.config" :key="field.key">
-            <label class="block text-xs text-gray-400 mb-1">
-              {{ field.label || field.key }}
-              <span v-if="field.required" class="text-orange-400">*</span>
-            </label>
-
-            <select
-              v-if="field.type === 'select'"
-              v-model="draft[field.key]"
-              class="w-full text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500/50"
+        <div v-else class="mt-5 space-y-6">
+          <div v-for="field in plugin.config" :key="field.key" class="space-y-1">
+            <!-- boolean: a checkbox with its label beside it -->
+            <label
+              v-if="field.type === 'bool'"
+              class="flex items-center gap-2.5 cursor-pointer select-none py-1"
             >
-              <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-            </select>
-
-            <label v-else-if="field.type === 'bool'" class="inline-flex items-center gap-2 text-xs text-gray-300">
-              <input v-model="draft[field.key]" type="checkbox" class="accent-orange-500" />
-              enabled
+              <input v-model="draft[field.key]" type="checkbox" class="sr-only" />
+              <span
+                class="w-4 h-4 rounded-[3px] border flex items-center justify-center transition-colors shrink-0"
+                :class="
+                  draft[field.key]
+                    ? 'bg-orange-500 border-orange-500'
+                    : 'bg-transparent border-white/25'
+                "
+              >
+                <Icon
+                  v-if="draft[field.key]"
+                  name="lucide:check"
+                  class="w-3 h-3 text-white"
+                  :stroke-width="3"
+                />
+              </span>
+              <span class="text-sm text-gray-200">{{ field.label || field.key }}</span>
             </label>
 
-            <input
-              v-else-if="field.type === 'int'"
-              v-model.number="draft[field.key]"
-              type="number"
-              :min="field.min ?? undefined"
-              :max="field.max ?? undefined"
-              class="w-full text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500/50"
-            />
-
-            <input
+            <!-- everything else: the label starts centred in the box and pops up to
+                 its top corner, so the border and the spacing never move -->
+            <div
               v-else
-              v-model="draft[field.key]"
-              :type="field.type === 'secret' ? 'password' : 'text'"
-              :placeholder="field.type === 'secret' ? 'unchanged' : ''"
-              class="w-full text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50"
-            />
+              class="relative h-11 rounded-lg border transition-colors"
+              :class="focused[field.key] ? 'border-orange-500/60' : 'border-white/10'"
+            >
+              <div v-if="field.type === 'select'" class="relative h-full">
+                <select
+                  v-model="draft[field.key]"
+                  class="h-full w-full bg-transparent pl-3 pr-8 pt-3 text-sm text-white outline-none appearance-none"
+                  @focus="focused[field.key] = true"
+                  @blur="focused[field.key] = false"
+                >
+                  <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                </select>
+                <Icon
+                  name="lucide:chevron-down"
+                  class="w-3.5 h-3.5 text-gray-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                />
+              </div>
 
-            <p v-if="field.help" class="text-[11px] text-gray-600 mt-1">{{ field.help }}</p>
+              <input
+                v-else
+                v-model="draft[field.key]"
+                :type="field.type === 'secret' ? 'password' : 'text'"
+                class="h-full w-full bg-transparent px-3 pt-3 text-sm text-white outline-none"
+                @focus="focused[field.key] = true"
+                @blur="focused[field.key] = false"
+              />
+
+              <label
+                class="absolute left-3 -translate-y-1/2 leading-none pointer-events-none select-none whitespace-nowrap transition-all duration-150 ease-out"
+                :class="labelFloats(field) ? 'top-[9px] text-[11px]' : 'top-1/2 text-sm'"
+                :style="{ color: focused[field.key] ? '#fb923c' : labelFloats(field) ? '#9ca3af' : '#6b7280' }"
+              >
+                {{ field.label || field.key }}
+                <span v-if="field.required" class="text-orange-400">*</span>
+              </label>
+            </div>
+
+            <p v-if="field.help" class="text-[11px] text-gray-600 pl-0.5">{{ field.help }}</p>
           </div>
 
           <div class="flex items-center gap-3">

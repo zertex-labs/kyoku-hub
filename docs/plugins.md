@@ -38,11 +38,10 @@ permissions:
 
 config:
   - key: multithread
-    type: select
+    type: string
     label: Threads
-    help: Files scanned in parallel.
+    help: MAX scans with every core, or give a number.
     default: MAX
-    options: [MAX, "1", "2", "4"]
   - key: skipExisting
     type: bool
     label: Skip files that already carry ReplayGain
