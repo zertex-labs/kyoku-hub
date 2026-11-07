@@ -51,6 +51,12 @@ const byProvider = computed(() => {
 
 const downloads = useDownloadStore();
 
+// Cover Art Archive keys covers by release group, which is the release the user
+// clicked. Not every group has one: the image hides itself on a 404 rather than
+// leaving a broken frame.
+const rgCover = `https://coverartarchive.org/release-group/${rgId}/front-500`;
+const rgCoverFailed = ref(false);
+
 // The walk runs on the server: clicking a card hands it the release-group
 // metadata and the album the user pointed at, then the modal takes over.
 async function startDownload(result: SearchResult) {
@@ -73,7 +79,7 @@ async function startDownload(result: SearchResult) {
 </script>
 
 <template>
-  <div class="max-w-5xl">
+  <div class="max-w-6xl">
     <!-- Back -->
     <button
       class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors mb-6"
@@ -83,13 +89,15 @@ async function startDownload(result: SearchResult) {
       Back
     </button>
 
-    <!-- Header -->
-    <div class="mb-6">
-      <h1 class="text-xl font-semibold text-white">Choose a release to download</h1>
-      <p v-if="titleParam" class="text-sm text-gray-400 mt-1">
-        {{ titleParam }}<span v-if="artistParam" class="text-gray-600"> · {{ artistParam }}</span>
-      </p>
-    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_15rem] gap-8 items-start">
+      <div class="min-w-0">
+        <!-- Header -->
+        <div class="mb-6">
+          <h1 class="text-xl font-semibold text-white">Choose a release to download</h1>
+          <p v-if="titleParam" class="text-sm text-gray-400 mt-1">
+            {{ titleParam }}<span v-if="artistParam" class="text-gray-600"> · {{ artistParam }}</span>
+          </p>
+        </div>
 
     <!-- Agent picker (only when multiple connected) -->
     <div v-if="connectedAgents.length > 0" class="mb-6">
@@ -255,6 +263,34 @@ async function startDownload(result: SearchResult) {
           </div>
         </div>
       </div>
+    </div>
+
+      </div>
+
+      <!-- The release the user came from: the provider presents its own artwork,
+           and the same album can ship a dozen covers. Comparing against this one
+           is how you pick the actual release. -->
+      <aside v-if="rgCover" class="hidden lg:block sticky top-6">
+        <div class="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-white/[0.03]">
+          <img
+            v-if="!rgCoverFailed"
+            :src="rgCover"
+            :alt="titleParam"
+            class="w-full h-full object-cover"
+            @error="rgCoverFailed = true"
+          />
+          <div v-else class="absolute inset-0 flex items-center justify-center">
+            <Icon name="lucide:disc-3" class="w-12 h-12 text-gray-700" />
+          </div>
+        </div>
+        <p class="mt-3 text-xs font-medium text-white leading-snug">
+          {{ titleParam || "This release" }}
+        </p>
+        <p class="text-[11px] text-gray-500 mt-0.5">{{ artistParam }}</p>
+        <p class="text-[10px] text-gray-600 mt-2 leading-relaxed">
+          Compare it with the releases on the left.
+        </p>
+      </aside>
     </div>
 
     <!-- Reopen affordance: the job outlives the modal -->
