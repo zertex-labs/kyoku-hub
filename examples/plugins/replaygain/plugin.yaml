@@ -1,0 +1,11 @@
+name: replaygain
+description: ReplayGain 2.0 album + track gain via rsgain
+command: ["./replaygain.sh"]
+# After kyoku has tagged the files (so the tags survive), before they move into
+# the library (so the album is scanned as one unit and gets album gain).
+hooks:
+  - album.beforePublish
+timeout: 600s
+# rsgain missing or broken must not cost the user their download.
+required: false
+extensions: [".flac", ".mp3", ".ogg", ".opus", ".m4a"]

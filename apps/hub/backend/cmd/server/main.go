@@ -19,6 +19,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/plugins"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 )
@@ -139,6 +140,15 @@ func main() {
 		}
 		agentManager.RequestSync(userID, false)
 	}
+	if registry, err := plugins.NewRegistry(cfg.PluginsDir, log); err != nil {
+		log.Warn("plugins not loaded", zap.String("dir", cfg.PluginsDir), zap.Error(err))
+	} else {
+		downloadManager.SetDispatcher(registry)
+		if n := registry.Count(); n > 0 {
+			log.Info("plugins loaded", zap.Int("count", n), zap.Strings("names", registry.Names()))
+		}
+	}
+
 	downloadHandler := handler.NewDownloadHandler(downloadManager, sources, q, log)
 	downloadHandler.Register(e.Group("/api/download"))
 

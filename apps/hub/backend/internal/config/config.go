@@ -30,6 +30,17 @@ type Config struct {
 	TidalUserID       string
 	TidalExpiresAt    int64  // Unix timestamp
 	DownloadDir       string // Directory where downloaded albums are written
+	PluginsDir        string // User-installed post-download plugins
+}
+
+// defaultPluginsDir is ~/.config/kyoku/plugins, so a plugin is installed by
+// dropping a directory there and nothing else.
+func defaultPluginsDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "./plugins"
+	}
+	return dir + "/kyoku/plugins"
 }
 
 func Load() (*Config, error) {
@@ -50,6 +61,7 @@ func Load() (*Config, error) {
 		TidalCountryCode:  getEnv("TIDAL_COUNTRY_CODE", "US"),
 		TidalUserID:       os.Getenv("TIDAL_USER_ID"),
 		DownloadDir:       getEnv("DOWNLOAD_DIR", "./downloads"),
+		PluginsDir:        getEnv("PLUGINS_DIR", defaultPluginsDir()),
 	}
 
 	if exp := os.Getenv("TIDAL_EXPIRES_AT"); exp != "" {

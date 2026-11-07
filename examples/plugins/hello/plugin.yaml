@@ -1,0 +1,10 @@
+# Drop this directory into ~/.config/kyoku/plugins/ to try it, then watch the
+# download log — every line the plugin prints on stderr becomes part of it.
+name: hello
+description: Prints the payload and writes a .txt beside the album
+command: ["./hello.sh"]
+hooks:
+  - album.beforePublish
+  - track.tagged
+timeout: 20s
+required: false
