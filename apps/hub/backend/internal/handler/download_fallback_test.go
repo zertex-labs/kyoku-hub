@@ -92,3 +92,20 @@ func (fakeSource) ProbeAlbum(context.Context, string, downloader.AlbumRef, []dow
 func (fakeSource) DownloadTrack(context.Context, string, string, string) (downloader.AudioQuality, error) {
 	return downloader.UnknownQuality, nil
 }
+
+// The alias retry is triggered by "nothing matches the title", not by an empty
+// result set: searching "Ado ルル" returns Ado's albums because the artist token
+// matches, and every one of them is the wrong release.
+func TestBestTitleRankDecidesWhetherToRetry(t *testing.T) {
+	albums := []downloader.SearchResult{
+		{Title: "Carnival"}, {Title: "Ado's Best Adobum"}, {Title: "KIRA"},
+	}
+	if got := bestTitleRank(albums, "ルル"); got >= 50 {
+		t.Fatalf("rank = %d, a retry should be attempted", got)
+	}
+
+	exact := []downloader.SearchResult{{Title: "RuLe"}}
+	if got := bestTitleRank(exact, "RuLe"); got < 50 {
+		t.Fatalf("rank = %d, an exact title needs no retry", got)
+	}
+}

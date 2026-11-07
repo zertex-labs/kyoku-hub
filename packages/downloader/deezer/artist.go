@@ -34,17 +34,26 @@ func (d *Deezer) ArtistAlbums(ctx context.Context, artist, title string) ([]down
 		return nil, err
 	}
 
+	// Order before mapping: SearchResult has no field for "this is a single", and
+	// a discography is mostly singles that must not outrank the albums. They
+	// cannot simply be dropped either — ルル is a single.
+	sort.SliceStable(albums, func(i, j int) bool {
+		ri := downloader.TitleRank(title, albums[i].Title)
+		rj := downloader.TitleRank(title, albums[j].Title)
+		if ri != rj {
+			return ri > rj
+		}
+		if wi, wj := typeWeight(albums[i].RecordType), typeWeight(albums[j].RecordType); wi != wj {
+			return wi > wj
+		}
+		return albums[i].ReleaseDate > albums[j].ReleaseDate
+	})
+
 	results := make([]downloader.SearchResult, 0, len(albums))
 	for _, a := range albums {
 		year := a.ReleaseDate
 		if len(year) > 4 {
 			year = year[:4]
-		}
-		// A discography is mostly singles; they are noise next to the album the
-		// user came for unless the title actually matches one.
-		rank := downloader.TitleRank(title, a.Title)
-		if (a.RecordType == "single" || a.RecordType == "") && rank == 0 {
-			continue
 		}
 		results = append(results, downloader.SearchResult{
 			Provider:   "deezer",
@@ -57,15 +66,6 @@ func (d *Deezer) ArtistAlbums(ctx context.Context, artist, title string) ([]down
 			Quality:    d.tier(),
 		})
 	}
-
-	sort.SliceStable(results, func(i, j int) bool {
-		ri := downloader.TitleRank(title, results[i].Title)
-		rj := downloader.TitleRank(title, results[j].Title)
-		if ri != rj {
-			return ri > rj
-		}
-		return results[i].Year > results[j].Year
-	})
 
 	// The artist listing carries no track count, and a picker that shows
 	// "0 tracks" is worse than one that shows nothing — fill it in for the
@@ -132,6 +132,21 @@ func (d *Deezer) artistAlbums(artistID int) ([]artistAlbum, error) {
 		return nil, fmt.Errorf("artist albums: parse: %w", err)
 	}
 	return resp.Data, nil
+}
+
+// typeWeight keeps albums above singles when the title does not decide it.
+// Singles cannot be dropped: the release being looked for often is one.
+func typeWeight(recordType string) int {
+	switch recordType {
+	case "album":
+		return 3
+	case "ep":
+		return 2
+	case "single":
+		return 1
+	default:
+		return 2
+	}
 }
 
 // albumTrackCount is a best-effort track count; zero means unknown and the UI

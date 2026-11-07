@@ -77,30 +77,24 @@ func (h *DownloadHandler) Search(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	type result struct {
-		items []downloader.SearchResult
-		err   error
-	}
-	ch := make(chan result, len(sources))
-	for _, src := range sources {
-		go func(s downloader.Source) {
-			items, err := s.SearchAlbums(ctx, q)
-			ch <- result{items, err}
-		}(src)
-	}
-
-	all := make([]downloader.SearchResult, 0, 20)
-	for range sources {
-		r := <-ch
-		if r.err != nil {
-			h.logger.Warn("provider search error", zap.String("q", q), zap.Error(r.err))
-			continue
-		}
-		all = append(all, r.items...)
-	}
+	all := h.searchSources(ctx, sources, q)
 
 	if artist != "" && !includeOthers {
 		all = rankResults(all, artist, title)
+	}
+
+	// A provider search for "Ado ルル" answers with Ado's albums, because the
+	// artist token matches and the title matches nothing — so an empty result is
+	// the wrong test. The question is whether anything actually matches the title.
+	//
+	// The provider stocks the release under the catalogue's language: MusicBrainz
+	// calls this single ルル and records "RuLe" as its English alias, and Deezer
+	// sells it as "RuLe". Retrying with the alias is a far sharper question than
+	// listing the whole discography.
+	if artist != "" && !includeOthers && bestTitleRank(all, title) < 50 {
+		if alt := h.aliasSearch(ctx, sources, c.Param("rgId"), artist, title); len(alt) > 0 {
+			all = alt
+		}
 	}
 
 	if len(all) == 0 && artist != "" && !includeOthers {
@@ -111,6 +105,71 @@ func (h *DownloadHandler) Search(c echo.Context) error {
 		all = []downloader.SearchResult{}
 	}
 	return c.JSON(http.StatusOK, all)
+}
+
+// bestTitleRank is the closest any result gets to the title asked for.
+func bestTitleRank(items []downloader.SearchResult, title string) int {
+	best := 0
+	for _, it := range items {
+		if r := downloader.TitleRank(title, it.Title); r > best {
+			best = r
+		}
+	}
+	return best
+}
+
+// searchSources asks every source the same question, in parallel, and merges.
+func (h *DownloadHandler) searchSources(
+	ctx context.Context,
+	sources map[string]downloader.Source,
+	query string,
+) []downloader.SearchResult {
+	type result struct {
+		items []downloader.SearchResult
+		err   error
+	}
+	ch := make(chan result, len(sources))
+	for _, src := range sources {
+		go func(s downloader.Source) {
+			items, err := s.SearchAlbums(ctx, query)
+			ch <- result{items, err}
+		}(src)
+	}
+
+	all := make([]downloader.SearchResult, 0, 20)
+	for range sources {
+		r := <-ch
+		if r.err != nil {
+			h.logger.Warn("provider search error", zap.String("q", query), zap.Error(r.err))
+			continue
+		}
+		all = append(all, r.items...)
+	}
+	return all
+}
+
+// aliasSearch retries the search once per MusicBrainz alias of the release
+// group. Aliases are exactly the bridge between scripts, so this finds the
+// transliterated title without guessing at romanisation ourselves.
+func (h *DownloadHandler) aliasSearch(
+	ctx context.Context,
+	sources map[string]downloader.Source,
+	rgID, artist, title string,
+) []downloader.SearchResult {
+	aliases, err := h.jobs.MBAliases(ctx, rgID)
+	if err != nil || len(aliases) == 0 {
+		return nil
+	}
+	for _, alias := range aliases {
+		items := h.searchSources(ctx, sources, strings.TrimSpace(artist+" "+alias))
+		if len(items) == 0 {
+			continue
+		}
+		h.logger.Info("found the release by its alias",
+			zap.String("title", title), zap.String("alias", alias))
+		return rankResults(items, artist, alias)
+	}
+	return nil
 }
 
 // artistFallback walks each source's discography for the artist itself.
