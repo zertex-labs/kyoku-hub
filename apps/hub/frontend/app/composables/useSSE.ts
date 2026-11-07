@@ -10,7 +10,14 @@ function connect(apiBase: string) {
     withCredentials: true,
   });
 
-  const knownEvents = ["artist:status", "artist:updated", "artist:failed", "fs:synced", "download:progress"];
+  const knownEvents = [
+    "artist:status",
+    "artist:updated",
+    "artist:failed",
+    "fs:synced",
+    "download:progress",
+    "download:job",
+  ];
   for (const event of knownEvents) {
     eventSource.addEventListener(event, (e) => {
       dispatch(event, JSON.parse((e as MessageEvent).data));

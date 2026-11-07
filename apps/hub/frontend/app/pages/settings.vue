@@ -8,11 +8,12 @@ const apiBase = config.public.apiBaseUrl as string;
 
 const MAX_AGENTS = 3;
 
-type SectionId = "account" | "agents" 
+type SectionId = "account" | "agents" | "connections"
 
 const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "account", label: "Account", icon: "lucide:user" },
   { id: "agents", label: "File System Agents", icon: "lucide:hard-drive" },
+  { id: "connections", label: "Connections", icon: "lucide:plug" },
 ];
 
 const route = useRoute();
@@ -164,6 +165,78 @@ function formatDate(date: string): string {
     day: "numeric",
   });
 }
+
+// --- Connections ---
+interface ConnectionStatus {
+  provider: string;
+  connected: boolean;
+}
+
+const connections = ref<ConnectionStatus[]>([]);
+const connectionsLoading = ref(false);
+const deezerARL = ref("");
+const connectingProvider = ref<string | null>(null);
+const disconnectingProvider = ref<string | null>(null);
+
+async function fetchConnections() {
+  connectionsLoading.value = true;
+  try {
+    const data = await $fetch<ConnectionStatus[]>(`${apiBase}/api/connections`, {
+      credentials: "include",
+    });
+    connections.value = data ?? [];
+  } catch (e) {
+    console.error("Failed to load connections:", e);
+  } finally {
+    connectionsLoading.value = false;
+  }
+}
+
+function isConnected(provider: string) {
+  return connections.value.find((c) => c.provider === provider)?.connected ?? false;
+}
+
+async function connectDeezer() {
+  if (!deezerARL.value.trim() || connectingProvider.value) return;
+  connectingProvider.value = "deezer";
+  try {
+    await $fetch(`${apiBase}/api/connections/deezer`, {
+      method: "PUT",
+      credentials: "include",
+      body: { arl: deezerARL.value.trim() },
+    });
+    deezerARL.value = "";
+    await fetchConnections();
+  } catch (e: any) {
+    alert("Failed to connect Deezer: " + (e?.data?.error ?? e?.message ?? "unknown error"));
+  } finally {
+    connectingProvider.value = null;
+  }
+}
+
+async function disconnectProvider(provider: string) {
+  if (disconnectingProvider.value) return;
+  disconnectingProvider.value = provider;
+  try {
+    await $fetch(`${apiBase}/api/connections/${provider}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    await fetchConnections();
+  } catch (e) {
+    console.error("Failed to disconnect:", e);
+  } finally {
+    disconnectingProvider.value = null;
+  }
+}
+
+watch(
+  active,
+  (v) => {
+    if (v === "connections") fetchConnections();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -389,6 +462,76 @@ function formatDate(date: string): string {
             <p class="text-xs text-gray-600 mt-1">
               Add one to connect your local music library.
             </p>
+          </div>
+        </section>
+
+        <!-- Connections -->
+        <section v-else-if="active === 'connections'">
+          <h2 class="text-lg font-semibold text-white mb-1">Connections</h2>
+          <p class="text-sm text-gray-500 mb-6">
+            Connect your music service accounts so kyoku can search and download releases.
+          </p>
+
+          <div v-if="connectionsLoading" class="text-sm text-gray-500">Loading…</div>
+
+          <div v-else class="space-y-4">
+            <!-- Deezer -->
+            <div class="rounded-xl border border-white/10 bg-white/[0.02] p-5">
+              <div class="flex items-center justify-between gap-4 mb-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center">
+                    <Icon name="lucide:music-2" class="w-4 h-4 text-orange-400" />
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-white">Deezer</p>
+                    <p class="text-xs" :class="isConnected('deezer') ? 'text-green-400' : 'text-gray-500'">
+                      {{ isConnected("deezer") ? "Connected" : "Not connected" }}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  v-if="isConnected('deezer')"
+                  :disabled="disconnectingProvider === 'deezer'"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-400 border border-red-400/20 rounded-lg hover:bg-red-400/10 disabled:opacity-40 transition-colors"
+                  @click="disconnectProvider('deezer')"
+                >
+                  <Icon
+                    :name="disconnectingProvider === 'deezer' ? 'lucide:loader-2' : 'lucide:unplug'"
+                    class="w-3.5 h-3.5"
+                    :class="{ 'animate-spin': disconnectingProvider === 'deezer' }"
+                  />
+                  Disconnect
+                </button>
+              </div>
+
+              <div v-if="!isConnected('deezer')" class="space-y-3">
+                <p class="text-xs text-gray-400">
+                  Paste your Deezer ARL cookie to connect. Find it in your browser's cookies for
+                  <code class="text-orange-300">deezer.com</code> after logging in.
+                </p>
+                <div class="flex gap-2">
+                  <input
+                    v-model="deezerARL"
+                    type="password"
+                    placeholder="ARL cookie value…"
+                    class="flex-1 min-w-0 text-xs bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50 font-mono"
+                    @keydown.enter="connectDeezer"
+                  />
+                  <button
+                    :disabled="!deezerARL.trim() || connectingProvider === 'deezer'"
+                    class="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
+                    @click="connectDeezer"
+                  >
+                    <Icon
+                      :name="connectingProvider === 'deezer' ? 'lucide:loader-2' : 'lucide:plug'"
+                      class="w-3.5 h-3.5"
+                      :class="{ 'animate-spin': connectingProvider === 'deezer' }"
+                    />
+                    Connect
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </div>

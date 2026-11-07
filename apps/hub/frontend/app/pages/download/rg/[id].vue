@@ -9,10 +9,24 @@ const titleParam = (route.query.title as string) ?? "";
 const artistParam = (route.query.artist as string) ?? "";
 const searchQuery = [artistParam, titleParam].filter(Boolean).join(" ");
 
+// Strict by default: results by another artist are noise. The switch exists for
+// the case where the provider spells the artist differently and strictness hides
+// everything.
+const showOthers = ref(false);
+
 // Fetch search results and connected agents in parallel
 const [{ data: results, status }, { data: agentsRaw }] = await Promise.all([
   useFetch<SearchResult[]>(`${apiBase}/api/download/rg/${rgId}/search`, {
-    query: { q: searchQuery },
+    // `artist`/`title` are the release group we came from: the hub drops results
+    // by another artist and orders the rest by title distance. Provider search
+    // alone returns adonä and Noir for "Ado DND".
+    query: {
+      q: searchQuery,
+      artist: artistParam,
+      title: titleParam,
+      others: computed(() => (showOthers.value ? "1" : "0")),
+    },
+    watch: [showOthers],
     credentials: "include",
   }),
   useFetch<{ id: string; label: string; connected: boolean }[]>(`${apiBase}/api/agent/list`, {
@@ -35,51 +49,31 @@ const byProvider = computed(() => {
   return map;
 });
 
-const activeDownload = ref<string | null>(null);
-const downloadPhase = ref("");
-const downloadTrack = ref(0);
-const downloadTotal = ref(0);
+const downloads = useDownloadStore();
 
+// The walk runs on the server: clicking a card hands it the release-group
+// metadata and the album the user pointed at, then the modal takes over.
 async function startDownload(result: SearchResult) {
-  if (activeDownload.value) return;
-  activeDownload.value = result.id;
-  downloadPhase.value = "queued";
-  try {
-    await $fetch(`${apiBase}/api/download/rg/${rgId}`, {
-      method: "POST",
-      credentials: "include",
-      body: {
-        provider: result.provider,
-        album_id: result.id,
-        agent_id: selectedAgentId.value ?? undefined,
-      },
-    });
-  } catch {
-    activeDownload.value = null;
-    downloadPhase.value = "";
-  }
+  await downloads.start(
+    rgId,
+    {
+      title: titleParam || result.title,
+      artist: artistParam || result.artist,
+      year: result.year,
+      trackCount: result.track_count,
+      cover: result.cover_url,
+    },
+    {
+      agentId: selectedAgentId.value,
+      provider: result.provider,
+      albumId: result.id,
+    },
+  );
 }
-
-const { on, off } = useSSE();
-
-function handleProgress(data: any) {
-  if (data.rg_id !== rgId) return;
-  downloadPhase.value = data.phase;
-  downloadTrack.value = data.track ?? 0;
-  downloadTotal.value = data.total ?? 0;
-  if (data.phase === "complete") {
-    setTimeout(() => router.back(), 1500);
-  } else if (data.phase === "error") {
-    activeDownload.value = null;
-  }
-}
-
-on("download:progress", handleProgress);
-onUnmounted(() => off("download:progress", handleProgress));
 </script>
 
 <template>
-  <div class="max-w-4xl">
+  <div class="max-w-5xl">
     <!-- Back -->
     <button
       class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors mb-6"
@@ -118,7 +112,7 @@ onUnmounted(() => off("download:progress", handleProgress));
             class="w-1.5 h-1.5 rounded-full flex-shrink-0"
             :class="selectedAgentId === agent.id ? 'bg-orange-400' : 'bg-green-400'"
           />
-          {{ agent.label }}
+          {{ agent.label || "Unnamed agent" }}
         </button>
         <button
           v-if="connectedAgents.length > 1"
@@ -138,12 +132,8 @@ onUnmounted(() => off("download:progress", handleProgress));
     <!-- Loading -->
     <div v-if="status === 'pending'" class="space-y-6">
       <div class="h-3 w-16 bg-white/5 rounded animate-pulse" />
-      <div class="flex gap-3">
-        <div
-          v-for="i in 5"
-          :key="i"
-          class="w-40 flex-shrink-0 bg-white/5 rounded-lg overflow-hidden animate-pulse"
-        >
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <div v-for="i in 8" :key="i" class="bg-white/5 rounded-lg overflow-hidden animate-pulse">
           <div class="w-full aspect-square bg-white/[0.03]" />
           <div class="p-2.5 space-y-2">
             <div class="h-2.5 w-3/4 bg-white/5 rounded" />
@@ -161,20 +151,39 @@ onUnmounted(() => off("download:progress", handleProgress));
     <!-- Empty -->
     <div v-else-if="!results?.length" class="text-sm text-gray-500 space-y-1">
       <p>No results found for "{{ searchQuery }}".</p>
-      <p class="text-xs text-gray-600">Check the hub backend logs for Tidal API errors.</p>
+      <p class="text-xs text-gray-600">Check that a provider is connected in Settings → Connections.</p>
     </div>
 
     <!-- Results by provider -->
     <div v-else class="space-y-8">
+      <div
+        v-if="status !== 'pending' && !Object.keys(byProvider).length"
+        class="rounded-lg border border-white/5 bg-white/[0.02] px-4 py-6 text-sm text-gray-400"
+      >
+        <p>
+          No releases by
+          <span class="text-white">{{ artistParam || "this artist" }}</span>
+          found for "{{ titleParam || searchQuery }}".
+        </p>
+        <button
+          class="mt-2 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+          @click="showOthers = true"
+        >
+          Show results from other artists anyway
+        </button>
+      </div>
+
       <div v-for="(items, provider) in byProvider" :key="provider">
         <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 capitalize">
           {{ provider }}
         </h2>
-        <div class="flex gap-3 overflow-x-auto pb-2">
+        <!-- Wrapping grid: every release stays visible. A horizontal strip clipped
+             the last card and put a scrollbar under the row for no reason. -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <div
             v-for="result in items"
             :key="result.id"
-            class="flex-shrink-0 w-40 bg-white/5 hover:bg-white/[0.08] rounded-lg overflow-hidden transition-colors"
+            class="bg-white/5 hover:bg-white/[0.08] rounded-lg overflow-hidden transition-colors"
           >
             <!-- Cover -->
             <div
@@ -218,15 +227,15 @@ onUnmounted(() => off("download:progress", handleProgress));
                 <button
                   class="text-[10px] px-1.5 py-0.5 rounded transition-colors"
                   :class="
-                    activeDownload
+                    downloads.starting
                       ? 'bg-white/5 text-gray-600 cursor-not-allowed'
                       : 'bg-orange-500/20 text-orange-400 hover:bg-orange-500/30'
                   "
-                  :disabled="!!activeDownload"
+                  :disabled="downloads.starting"
                   @click="startDownload(result)"
                 >
                   <Icon
-                    v-if="activeDownload === result.id"
+                    v-if="downloads.starting"
                     name="lucide:loader-circle"
                     class="w-3 h-3 animate-spin"
                   />
@@ -239,32 +248,46 @@ onUnmounted(() => off("download:progress", handleProgress));
       </div>
     </div>
 
-    <!-- Sticky progress bar -->
-    <Transition
-      enter-active-class="transition duration-200 ease-out"
-      enter-from-class="opacity-0 translate-y-2"
-      enter-to-class="opacity-100 translate-y-0"
-      leave-active-class="transition duration-150 ease-in"
-      leave-from-class="opacity-100 translate-y-0"
-      leave-to-class="opacity-0 translate-y-2"
+    <!-- Reopen affordance: the job outlives the modal -->
+    <button
+      v-if="downloads.job && !downloads.open"
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#1a1a1f] border border-white/10 shadow-xl text-xs text-gray-300 hover:text-white hover:border-white/20 transition-colors"
+      @click="downloads.open = true"
     >
-      <div
-        v-if="activeDownload"
-        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-lg bg-[#1a1a1f] border border-white/10 shadow-xl text-sm"
-      >
-        <Icon
-          v-if="downloadPhase !== 'complete'"
-          name="lucide:loader-circle"
-          class="w-4 h-4 text-orange-400 animate-spin flex-shrink-0"
-        />
-        <Icon v-else name="lucide:check-circle" class="w-4 h-4 text-green-400 flex-shrink-0" />
-        <span v-if="downloadPhase === 'complete'" class="text-green-400">Download complete</span>
-        <span v-else-if="downloadPhase === 'queued'" class="text-gray-300">Queued…</span>
-        <span v-else class="text-gray-300">
-          Downloading track {{ downloadTrack }}/{{ downloadTotal }}
-          <span v-if="downloadPhase" class="text-gray-500"> · {{ downloadPhase }}</span>
-        </span>
-      </div>
-    </Transition>
+      <Icon
+        :name="
+          downloads.job.phase === 'done'
+            ? 'lucide:check-circle'
+            : downloads.job.phase === 'failed'
+              ? 'lucide:circle-x'
+              : 'lucide:loader-circle'
+        "
+        class="w-4 h-4"
+        :class="{
+          'text-green-400': downloads.job.phase === 'done',
+          'text-red-400': downloads.job.phase === 'failed',
+          'text-orange-400 animate-spin':
+            downloads.job.phase !== 'done' && downloads.job.phase !== 'failed',
+        }"
+      />
+      {{
+        downloads.job.phase === "done"
+          ? "Download finished"
+          : downloads.job.phase === "failed"
+            ? "Download failed"
+            : downloads.job.phase === "results"
+              ? "Waiting for you"
+              : "Downloading"
+      }}
+    </button>
+
+    <p v-if="downloads.error" class="text-xs text-red-400 mt-4">{{ downloads.error }}</p>
+
+    <DownloadJobModal
+      :open="downloads.open"
+      :job="downloads.job"
+      @close="downloads.close()"
+      @decide="downloads.decide"
+    />
   </div>
 </template>

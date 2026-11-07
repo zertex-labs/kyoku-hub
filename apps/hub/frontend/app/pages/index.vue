@@ -5,6 +5,35 @@ await artistStore.fetchArtists();
 
 const activities = ref<ArtistActivity[]>([]);
 
+// How much of each artist is actually on disk. The list used to show a
+// hardcoded 75% next to every name, so an artist you had nothing of still read
+// "60/80".
+type Ownership = { owned: number; total: number };
+const ownership = ref<Record<string, Ownership>>({});
+
+async function loadOwnership() {
+  try {
+    const rows = await $fetch<({ mb_artist_id: string } & Ownership)[]>(
+      `${useRuntimeConfig().public.apiBaseUrl}/api/artist/ownership`,
+      { credentials: "include" },
+    );
+    const map: Record<string, Ownership> = {};
+    for (const r of rows ?? []) map[r.mb_artist_id] = { owned: r.owned, total: r.total };
+    ownership.value = map;
+  } catch (e) {
+    console.error("Failed to load ownership:", e);
+  }
+}
+
+function ownershipOf(id: string): Ownership | undefined {
+  return ownership.value[id];
+}
+
+function ownershipPct(o?: Ownership): number {
+  if (!o || !o.total) return 0;
+  return Math.round((o.owned / o.total) * 100);
+}
+
 const showAddModal = ref(false);
 const nameFilter = ref("");
 const syncing = ref(false);
@@ -31,6 +60,7 @@ const showUntagged = ref(false);
 
 if (import.meta.client) {
   fsStore.fetchUntagged().catch((e) => console.error("Failed to fetch untagged files:", e));
+  loadOwnership();
 }
 
 // SSE: real-time artist updates
@@ -38,6 +68,7 @@ const { on, off } = useSSE();
 
 function handleFsSynced() {
   fsStore.fetchUntagged().catch(() => {});
+  loadOwnership();
 }
 
 function handleArtistStatus(data: { mb_artist_id: string; status: string }) {
@@ -193,13 +224,33 @@ async function removeArtist(mbArtistId: string) {
             </a>
           </div>
 
-          <!-- Release groups -->
+          <!-- Release groups: owned / total, counted from the library -->
           <template v-if="artist.status === 'synced'">
-            <span class="text-[11px] text-orange-400 font-semibold">
-              {{ Math.round(artist.release_group_count * 0.75) }}/{{ artist.release_group_count }}
+            <span
+              v-if="ownershipOf(artist.mb_artist_id)"
+              class="text-[11px] font-semibold w-12 text-right"
+              :class="
+                ownershipPct(ownershipOf(artist.mb_artist_id)) === 100
+                  ? 'text-green-400'
+                  : ownershipOf(artist.mb_artist_id)!.owned === 0
+                    ? 'text-gray-500'
+                    : 'text-orange-400'
+              "
+            >
+              {{ ownershipOf(artist.mb_artist_id)!.owned }}/{{
+                ownershipOf(artist.mb_artist_id)!.total
+              }}
             </span>
             <div class="w-16 h-1 rounded-full bg-white/10 overflow-hidden">
-              <div class="h-full rounded-full bg-orange-500" style="width: 75%" />
+              <div
+                class="h-full rounded-full"
+                :class="
+                  ownershipPct(ownershipOf(artist.mb_artist_id)) === 100
+                    ? 'bg-green-500'
+                    : 'bg-orange-500'
+                "
+                :style="{ width: ownershipPct(ownershipOf(artist.mb_artist_id)) + '%' }"
+              />
             </div>
           </template>
           <span v-else class="text-[11px] text-gray-500 italic">queued</span>
