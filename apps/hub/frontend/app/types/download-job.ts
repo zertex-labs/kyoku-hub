@@ -75,6 +75,8 @@ export interface JobAlbum {
   year: string
   trackCount: number
   cover?: string
+  /** MusicBrainz release (an edition), when the user picked one. */
+  releaseId?: string
 }
 
 export interface Job {

@@ -29,7 +29,14 @@ export const useDownloadStore = defineStore("download", () => {
 
   async function start(
     rgId: string,
-    album: { title: string; artist: string; year: string; trackCount: number; cover?: string },
+    album: {
+      title: string;
+      artist: string;
+      year: string;
+      trackCount: number;
+      cover?: string;
+      releaseId?: string;
+    },
     opts: { agentId?: string | null; provider?: string; albumId?: string; mode?: "order" | "best" } = {},
   ) {
     starting.value = true;

@@ -34,6 +34,25 @@ const [{ data: results, status }, { data: agentsRaw }] = await Promise.all([
   }),
 ]);
 
+// The editions of this release group on MusicBrainz. Seven of them can share a
+// track count, so the picker is the only way to say which one this is; without a
+// choice the resolver guesses.
+type MBRelease = {
+  id: string;
+  title: string;
+  date: string;
+  country: string;
+  status: string;
+  trackCount: number;
+};
+
+const { data: mbReleases } = await useFetch<MBRelease[]>(
+  `${apiBase}/api/download/rg/${rgId}/releases`,
+  { credentials: "include" },
+);
+
+const chosenRelease = ref<string>("");
+
 const connectedAgents = computed(() => (agentsRaw.value ?? []).filter((a) => a.connected));
 
 // Auto-select the only connected agent if there's exactly one
@@ -72,6 +91,7 @@ async function startDownload(result: SearchResult) {
       year: result.year,
       trackCount: result.track_count,
       cover: result.cover_url,
+      releaseId: chosenRelease.value || undefined,
     },
     {
       agentId: selectedAgentId.value,
@@ -138,6 +158,25 @@ async function startDownload(result: SearchResult) {
             </button>
           </div>
         </div>
+
+              <div v-if="(mbReleases?.length ?? 0) > 1" class="mt-5">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                  Release edition
+                </p>
+                <select
+                  v-model="chosenRelease"
+                  class="w-full max-w-md bg-black/30 border border-white/10 rounded-md px-2.5 py-1.5 text-xs text-gray-200 outline-none focus:border-orange-500/50"
+                >
+                  <option value="">Auto — match by track count</option>
+                  <option v-for="r in mbReleases" :key="r.id" :value="r.id">
+                    {{ r.date || "date unknown" }} · {{ r.country || "—" }} ·
+                    {{ r.status || "release" }} · {{ r.trackCount }} tracks
+                  </option>
+                </select>
+                <p class="text-[11px] text-gray-600 mt-1">
+                  The edition owns the label, the date and the MusicBrainz id.
+                </p>
+              </div>
           </div>
           <div
             v-if="rgCover"

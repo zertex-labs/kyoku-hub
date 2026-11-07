@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,7 +43,35 @@ func newMBClient() *mbClient {
 // get serialises calls at one per second. Holding the lock across the wait is
 // deliberate: two concurrent lookups would otherwise both see an empty window
 // and fire together.
+//
+// A 503 from MusicBrainz is routine — it is a shared service and the rate limit
+// is enforced loosely by burst. One retry after a pause rescues the lookup; a
+// second failure means the metadata is simply not worth blocking a download for.
 func (c *mbClient) get(ctx context.Context, path string, out any) error {
+	err := c.getOnce(ctx, path, out)
+	if isTransient(err) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		err = c.getOnce(ctx, path, out)
+	}
+	return err
+}
+
+// isTransient reports whether MusicBrainz asked us to come back later.
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "status 503") ||
+		strings.Contains(msg, "status 429") ||
+		strings.Contains(msg, "status 502")
+}
+
+func (c *mbClient) getOnce(ctx context.Context, path string, out any) error {
 	c.mu.Lock()
 	if wait := c.spacing - time.Since(c.last); wait > 0 {
 		select {

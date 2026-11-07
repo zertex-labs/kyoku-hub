@@ -30,7 +30,9 @@ func (m *Manager) artifact(
 	cover []byte,
 ) postprocess.Artifact {
 	artist := firstNonEmptyString(cand.Artist, job.Album.Artist)
-	album := firstNonEmptyString(cand.Title, job.Album.Title)
+	// The chosen edition wins over the provider's licensed title: Deezer calls
+	// 放生会 "Carnival", and a file tagged with that is a file nobody can find.
+	album := firstNonEmptyString(mb.albumTitle(), cand.Title, job.Album.Title)
 
 	return postprocess.Artifact{
 		Path: path,
@@ -39,9 +41,9 @@ func (m *Manager) artifact(
 		Album:          album,
 		AlbumArtist:    artist,
 		Artist:         artist,
-		Year:           dateFor(job, cand),
+		Year:           firstNonEmptyString(mb.albumDate(), dateFor(job, cand)),
 		Genre:          cand.Genre,
-		Label:          cand.Label,
+		Label:          firstNonEmptyString(mb.albumLabel(), cand.Label),
 		ReleaseType:    cand.Format,
 		ReleaseGroupID: job.RGID,
 		DiscTotal:      discCount(cand),

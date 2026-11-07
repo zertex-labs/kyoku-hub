@@ -11,22 +11,28 @@ import (
 // metadataLines reports what the post-processors are about to write, once per
 // album. The per-track details follow as tracks download; this is the "what is
 // going into these files" header, so a user never has to open a tag editor.
-func metadataLines(job *Job, cand downloader.AlbumCandidate, cover []byte, chain *postprocess.Chain) []string {
+func metadataLines(job *Job, cand downloader.AlbumCandidate, mb *mbInfo, cover []byte, chain *postprocess.Chain) []string {
+	// The same precedence the tagger uses, or the log would describe one edition
+	// and the files would carry another.
+	title := firstNonEmptyString(mb.albumTitle(), cand.Title)
+	date := firstNonEmptyString(mb.albumDate(), dateFor(job, cand))
+	label := firstNonEmptyString(mb.albumLabel(), cand.Label)
+
 	var album []string
-	if cand.Title != "" || cand.Artist != "" {
-		album = append(album, strings.TrimSpace(cand.Artist+" — "+cand.Title))
+	if title != "" || cand.Artist != "" {
+		album = append(album, strings.TrimSpace(cand.Artist+" — "+title))
 	}
 	if cand.Format != "" {
 		album = append(album, cand.Format)
 	}
-	if d := dateFor(job, cand); d != "" {
-		album = append(album, d)
+	if date != "" {
+		album = append(album, date)
 	}
 	if cand.Genre != "" {
 		album = append(album, cand.Genre)
 	}
-	if cand.Label != "" {
-		album = append(album, cand.Label)
+	if label != "" {
+		album = append(album, label)
 	}
 
 	lines := []string{
@@ -46,7 +52,11 @@ func metadataLines(job *Job, cand downloader.AlbumCandidate, cover []byte, chain
 	}
 
 	if job.RGID != "" {
-		lines = append(lines, "mb · release group "+job.RGID)
+		line := "mb · release group " + job.RGID
+		if job.Album.ReleaseID != "" {
+			line += " · release " + job.Album.ReleaseID
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }

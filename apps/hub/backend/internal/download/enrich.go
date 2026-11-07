@@ -21,19 +21,31 @@ import (
 type mbInfo struct {
 	rgid string
 
+	// chosen is the release the user picked on the download page. When set it
+	// wins outright: guessing from the track count is only for the case where
+	// nobody chose, and it can pick a different edition than the one on screen.
+	chosen string
+
 	mu      sync.Mutex
 	artist  string
 	release string
 	rec     map[string]string // isrc -> recording id
-	pending map[string]bool   // isrcs not yet looked up
-	err     string
+
+	relTitle string // the chosen release's title, date and label
+	relDate  string
+	relLabel string
+	relID    string
+	pending  map[string]bool // isrcs not yet looked up
+	err      string
 }
 
 type mbRelease struct {
-	ID     string       `json:"id"`
-	Date   string       `json:"date"`
-	Status string       `json:"status"`
-	Media  []mbMediaOpt `json:"media"`
+	ID      string       `json:"id"`
+	Title   string       `json:"title"`
+	Date    string       `json:"date"`
+	Country string       `json:"country"`
+	Status  string       `json:"status"`
+	Media   []mbMediaOpt `json:"media"`
 }
 
 type mbMediaOpt struct {
@@ -53,6 +65,32 @@ type mbGroupResp struct {
 	Releases []mbRelease `json:"releases"`
 }
 
+// mbReleaseResp is one edition: the thing that owns a label, a date and a title.
+type mbReleaseResp struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Date      string `json:"date"`
+	Country   string `json:"country"`
+	Status    string `json:"status"`
+	LabelInfo []struct {
+		Label struct {
+			Name string `json:"name"`
+		} `json:"label"`
+		CatalogNumber string `json:"catalog-number"`
+	} `json:"label-info"`
+	Media []mbMediaOpt `json:"media"`
+}
+
+// LabelName is the imprint of the edition, without the catalogue number.
+func (r mbReleaseResp) LabelName() string {
+	for _, l := range r.LabelInfo {
+		if l.Label.Name != "" {
+			return l.Label.Name
+		}
+	}
+	return ""
+}
+
 type mbISRCResp struct {
 	Recordings []struct {
 		ID    string `json:"id"`
@@ -63,15 +101,28 @@ type mbISRCResp struct {
 // resolveMB starts the lookups in the background and returns immediately: tracks
 // are still downloading while it runs, and a 1 req/s budget means a 14-track
 // album takes ~15s, which is roughly how long the audio takes anyway.
-func (m *Manager) resolveMB(ctx context.Context, rgid string, cand downloader.AlbumCandidate) *mbInfo {
+func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand downloader.AlbumCandidate) *mbInfo {
 	info := &mbInfo{
-		rgid: rgid,
-		rec:  make(map[string]string, len(cand.Tracks)),
+		rgid:   rgid,
+		chosen: releaseID,
+		rec:    make(map[string]string, len(cand.Tracks)),
 	}
 	// No group id, no client, or an id that is not a UUID (a test fixture, a
 	// malformed request): nothing to look up, and nothing must wait for it.
 	if rgid == "" || m.mb == nil || !looksLikeUUID(rgid) {
 		return info
+	}
+
+	// One request, synchronously, because the album title, date and label go into
+	// the very first file. The per-track ISRC lookups below can lag; these cannot.
+	if releaseID != "" && looksLikeUUID(releaseID) {
+		var rel mbReleaseResp
+		if err := m.mb.get(ctx, "/release/"+releaseID+"?fmt=json&inc=labels+release-groups", &rel); err == nil {
+			info.relID = rel.ID
+			info.relTitle = rel.Title
+			info.relDate = rel.Date
+			info.relLabel = rel.LabelName()
+		}
 	}
 
 	info.pending = make(map[string]bool, len(cand.Tracks))
@@ -115,8 +166,11 @@ func (m *Manager) resolveMB(ctx context.Context, rgid string, cand downloader.Al
 		info.artist = artistID
 		// Only claim a release when exactly one matches what we downloaded:
 		// several editions of the same group are normal, and a wrong
-		// MUSICBRAINZ_ALBUMID is worse than none.
-		if id := pickRelease(group.Releases, len(cand.Tracks)); id != "" {
+		// MUSICBRAINZ_ALBUMID is worse than none. A release the user chose
+		// needs no guessing at all.
+		if info.chosen != "" {
+			info.release = info.chosen
+		} else if id := pickRelease(group.Releases, len(cand.Tracks)); id != "" {
 			info.release = id
 		}
 		isrcs := make([]string, 0, len(info.pending))
@@ -225,6 +279,24 @@ func (i *mbInfo) artistID() string {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.artist
+}
+
+func (i *mbInfo) albumTitle() string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.relTitle
+}
+
+func (i *mbInfo) albumDate() string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.relDate
+}
+
+func (i *mbInfo) albumLabel() string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.relLabel
 }
 
 func (i *mbInfo) releaseID() string {

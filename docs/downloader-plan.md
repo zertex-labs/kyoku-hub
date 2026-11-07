@@ -261,6 +261,16 @@ answer is an *estimate* until the bytes land:
              ground truth is `streamUrl?soundQuality=`, which will quietly hand back a
              lower tier.
 
+- [ ] **A release group is not a release.** The group is the album; the release is the
+      edition that owns a label, a date, barcode and MusicBrainz id — and one group
+      can have seven editions with identical track counts, so the track-count guess
+      cannot pick between them. The download page lists them (`GET /api/download/rg/
+      :id/releases`) and passes `album.releaseId`; when it is set the resolver uses it
+      outright and takes its title, date and label for the tags. Deezer called 放生会
+      "Carnival", and a file tagged with that is a file nobody finds.
+      The release lookup runs synchronously — the first file needs the album title —
+      while the per-track ISRC lookups stay in the background.
+
 - [ ] **Search by catalogue title, not cover title.** A provider keeps the name it
       was licensed under: Deezer files 椎名林檎 as "Sheena Ringo" and 三毒史 as
       "triviṣa-itihāsa", so the exact pair returns zero results for an album that

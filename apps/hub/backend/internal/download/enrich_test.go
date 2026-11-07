@@ -29,6 +29,11 @@ func fakeMB(t *testing.T, hits *int32) *mbClient {
 			    {"id":"99cc17f3-3d4e-4cf7-9569-1a84ac1f9658","date":"2026-10-15","status":"Official",
 			     "media":[{"track-count":2}]}
 			  ]}`)
+		case strings.HasPrefix(r.URL.Path, "/release/782b43b0-e017-45bf-9eca-d1d7f87e9073"):
+			fmt.Fprint(w, `{
+			  "id":"782b43b0-e017-45bf-9eca-d1d7f87e9073","title":"放生会","date":"2024-05-28","country":"XW","status":"Official",
+			  "label-info":[{"label":{"name":"EMI Records"},"catalog-number":"00602465697216"}],
+			  "media":[{"track-count":13}]}`)
 		case strings.HasPrefix(r.URL.Path, "/isrc/JPPO02603857"):
 			fmt.Fprint(w, `{"isrc":"JPPO02603857","recordings":[{"id":"662ec667-2102-41a2-a9e0-3b46da7af447","title":"Raven Sky"}]}`)
 		default:
@@ -50,7 +55,7 @@ func TestResolveMBFillsArtistReleaseAndRecording(t *testing.T) {
 	var hits int32
 	m := &Manager{mb: fakeMB(t, &hits)}
 
-	info := m.resolveMB(context.Background(), testRGID, downloader.AlbumCandidate{Tracks: mbTracks()})
+	info := m.resolveMB(context.Background(), testRGID, "", downloader.AlbumCandidate{Tracks: mbTracks()})
 
 	id := info.recording(context.Background(), "JPPO02603857", 3*time.Second)
 	if id != "662ec667-2102-41a2-a9e0-3b46da7af447" {
@@ -85,7 +90,7 @@ func TestResolveMBSkipsIdsThatAreNotUUIDs(t *testing.T) {
 	var hits int32
 	m := &Manager{mb: fakeMB(t, &hits)}
 
-	info := m.resolveMB(context.Background(), "rg-1", downloader.AlbumCandidate{Tracks: mbTracks()})
+	info := m.resolveMB(context.Background(), "rg-1", "", downloader.AlbumCandidate{Tracks: mbTracks()})
 	info.recording(context.Background(), "JPPO02603857", 50*time.Millisecond)
 
 	if n := atomic.LoadInt32(&hits); n != 0 {
@@ -95,7 +100,7 @@ func TestResolveMBSkipsIdsThatAreNotUUIDs(t *testing.T) {
 
 func TestResolveMBWithoutAClientIsInert(t *testing.T) {
 	m := &Manager{}
-	info := m.resolveMB(context.Background(), testRGID, downloader.AlbumCandidate{Tracks: mbTracks()})
+	info := m.resolveMB(context.Background(), testRGID, "", downloader.AlbumCandidate{Tracks: mbTracks()})
 	start := time.Now()
 	if got := info.recording(context.Background(), "JPPO02603857", 2*time.Second); got != "" {
 		t.Fatalf("got %q with no client", got)
@@ -136,5 +141,53 @@ func TestPickReleaseOnlyWhenUnambiguous(t *testing.T) {
 	}}}
 	if got := pickRelease(multiDisc, 12); got != "a" {
 		t.Errorf("multi-disc total = %q", got)
+	}
+}
+
+// A chosen release is not a guess: it supplies the title, the date and the label,
+// and the provider's licensed title is exactly what it overrides - Deezer calls
+// 放生会 "Carnival".
+func TestChosenReleaseOwnsTheMetadata(t *testing.T) {
+	var hits int32
+	m := &Manager{mb: fakeMB(t, &hits)}
+
+	info := m.resolveMB(context.Background(),
+		testRGID, "782b43b0-e017-45bf-9eca-d1d7f87e9073",
+		downloader.AlbumCandidate{Tracks: mbTracks()})
+
+	// The lookups run in the background; this blocks until they finish.
+	info.recording(context.Background(), "JPPO02603857", 3*time.Second)
+
+	if got := info.releaseID(); got != "782b43b0-e017-45bf-9eca-d1d7f87e9073" {
+		t.Fatalf("release id = %q, want the chosen one", got)
+	}
+	if got := info.albumTitle(); got != "放生会" {
+		t.Errorf("title = %q", got)
+	}
+	if got := info.albumDate(); got != "2024-05-28" {
+		t.Errorf("date = %q", got)
+	}
+	if got := info.albumLabel(); got != "EMI Records" {
+		t.Errorf("label = %q", got)
+	}
+}
+
+// Without a choice, the old behaviour stands: claim a release only when the
+// track count singles one out.
+func TestNoChosenReleaseStillGuesses(t *testing.T) {
+	var hits int32
+	m := &Manager{mb: fakeMB(t, &hits)}
+
+	info := m.resolveMB(context.Background(), testRGID, "",
+		downloader.AlbumCandidate{Tracks: mbTracks()})
+
+	// Blocks until the background group/ISRC lookups are done.
+	info.recording(context.Background(), "JPPO02603857", 3*time.Second)
+
+	if got := info.releaseID(); got != "99cc17f3-3d4e-4cf7-9569-1a84ac1f9658" {
+		t.Fatalf("release id = %q", got)
+	}
+	if got := info.albumTitle(); got != "" {
+		t.Errorf("title = %q, want empty (nothing was chosen)", got)
 	}
 }

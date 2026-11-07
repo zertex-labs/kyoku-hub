@@ -372,7 +372,7 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 
 	// MusicBrainz artwork of the tags, resolved in the background at 1 req/s
 	// while the audio downloads. Best-effort: no network, no MB tags.
-	mb := m.resolveMB(ctx, job.RGID, pick.cand)
+	mb := m.resolveMB(ctx, job.RGID, job.Album.ReleaseID, pick.cand)
 	if err := mb.failures(); err != "" {
 		job.log("warn", "musicbrainz: "+err)
 	}
@@ -387,7 +387,7 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 		job.log("warn", "could not write cover.jpg: "+err.Error())
 	}
 
-	for _, line := range metadataLines(job, pick.cand, cover, m.post) {
+	for _, line := range metadataLines(job, pick.cand, mb, cover, m.post) {
 		job.log("info", line)
 	}
 	if names := m.pluginNames(); len(names) > 0 {

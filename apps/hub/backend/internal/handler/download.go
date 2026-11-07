@@ -40,6 +40,7 @@ func NewDownloadHandler(
 
 func (h *DownloadHandler) Register(g *echo.Group) {
 	g.GET("/rg/:rgId/search", h.Search, mw.AuthRequired(h.queries))
+	g.GET("/rg/:rgId/releases", h.Releases, mw.AuthRequired(h.queries))
 
 	g.POST("/jobs", h.StartJob, mw.AuthRequired(h.queries))
 	g.GET("/jobs", h.ListJobs, mw.AuthRequired(h.queries))
@@ -147,6 +148,19 @@ func artistFallback(
 		out = append(out, items...)
 	}
 	return out
+}
+
+// Releases lists the MusicBrainz editions of a release group, so the user can
+// pick the one they mean instead of leaving the resolver to guess from the track
+// count — which cannot tell seven 13-track editions apart.
+func (h *DownloadHandler) Releases(c echo.Context) error {
+	items, err := h.jobs.MBReleases(c.Request().Context(), c.Param("rgId"))
+	if err != nil {
+		// Empty is a fine answer here: the page just offers no choice.
+		h.logger.Warn("release list unavailable", zap.Error(err))
+		return c.JSON(http.StatusOK, []download.MBRelease{})
+	}
+	return c.JSON(http.StatusOK, items)
 }
 
 type startJobRequest struct {

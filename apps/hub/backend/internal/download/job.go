@@ -30,6 +30,12 @@ type AlbumView struct {
 	Year       string `json:"year"`
 	TrackCount int    `json:"trackCount"`
 	Cover      string `json:"cover,omitempty"`
+
+	// ReleaseID is the MusicBrainz release the user picked, when they picked
+	// one. A release group is the album; a release is the edition — the thing
+	// that owns a label, a date and a barcode. Left empty, the resolver guesses
+	// one from the track count, which is a guess and is not always right.
+	ReleaseID string `json:"releaseId,omitempty"`
 }
 
 type SourceView struct {
