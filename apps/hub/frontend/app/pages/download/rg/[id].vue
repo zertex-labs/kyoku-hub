@@ -54,8 +54,24 @@ const downloads = useDownloadStore();
 // Cover Art Archive keys covers by release group, which is the release the user
 // clicked. Not every group has one: the image hides itself on a 404 rather than
 // leaving a broken frame.
-const rgCover = `https://coverartarchive.org/release-group/${rgId}/front-500`;
+const rgCover = `https://coverartarchive.org/release-group/${rgId}/front-250`;
 const rgCoverFailed = ref(false);
+
+// The reference is useful while hunting for the right edition and noise once you
+// have it, so it collapses. The choice is remembered: nobody wants to fold the
+// same panel away on every release.
+const showRef = ref(true);
+const REF_KEY = "kyoku.download.showReference";
+
+onMounted(() => {
+  const saved = localStorage.getItem(REF_KEY);
+  if (saved !== null) showRef.value = saved === "1";
+});
+
+function toggleRef() {
+  showRef.value = !showRef.value;
+  localStorage.setItem(REF_KEY, showRef.value ? "1" : "0");
+}
 
 // The walk runs on the server: clicking a card hands it the release-group
 // metadata and the album the user pointed at, then the modal takes over.
@@ -89,14 +105,33 @@ async function startDownload(result: SearchResult) {
       Back
     </button>
 
-    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_15rem] gap-8 items-start">
-      <div class="min-w-0">
+    <div class="flex items-start">
+      <div class="min-w-0 flex-1">
         <!-- Header -->
-        <div class="mb-6">
-          <h1 class="text-xl font-semibold text-white">Choose a release to download</h1>
-          <p v-if="titleParam" class="text-sm text-gray-400 mt-1">
-            {{ titleParam }}<span v-if="artistParam" class="text-gray-600"> · {{ artistParam }}</span>
-          </p>
+        <div class="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-xl font-semibold text-white">Choose a release to download</h1>
+            <p v-if="titleParam" class="text-sm text-gray-400 mt-1">
+              {{ titleParam }}<span v-if="artistParam" class="text-gray-600"> · {{ artistParam }}</span>
+            </p>
+          </div>
+          <button
+            v-if="rgCover"
+            class="hidden lg:inline-flex items-center gap-1.5 shrink-0 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
+            :class="
+              showRef
+                ? 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
+                : 'border-orange-500/40 bg-orange-500/10 text-orange-300'
+            "
+            :aria-expanded="showRef"
+            @click="toggleRef"
+          >
+            <Icon
+              :name="showRef ? 'lucide:panel-right-close' : 'lucide:panel-right-open'"
+              class="w-3.5 h-3.5"
+            />
+            {{ showRef ? "Hide reference" : "Show reference" }}
+          </button>
         </div>
 
     <!-- Agent picker (only when multiple connected) -->
@@ -270,7 +305,16 @@ async function startDownload(result: SearchResult) {
       <!-- The release the user came from: the provider presents its own artwork,
            and the same album can ship a dozen covers. Comparing against this one
            is how you pick the actual release. -->
-      <aside v-if="rgCover" class="hidden lg:block sticky top-6">
+      <aside
+        v-if="rgCover"
+        class="hidden lg:block shrink-0 sticky top-6 overflow-hidden transition-all duration-300 ease-out"
+        :style="{
+          width: showRef ? '15rem' : '0rem',
+          marginLeft: showRef ? '2rem' : '0rem',
+          opacity: showRef ? 1 : 0,
+        }"
+      >
+        <div class="w-60">
         <div class="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-white/[0.03]">
           <img
             v-if="!rgCoverFailed"
@@ -290,6 +334,7 @@ async function startDownload(result: SearchResult) {
         <p class="text-[10px] text-gray-600 mt-2 leading-relaxed">
           Compare it with the releases on the left.
         </p>
+        </div>
       </aside>
     </div>
 
