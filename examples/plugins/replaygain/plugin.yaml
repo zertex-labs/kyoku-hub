@@ -1,11 +1,35 @@
+apiVersion: 1
 name: replaygain
-description: ReplayGain 2.0 album + track gain via rsgain
-command: ["./replaygain.sh"]
-# After kyoku has tagged the files (so the tags survive), before they move into
-# the library (so the album is scanned as one unit and gets album gain).
-hooks:
-  - album.beforePublish
+version: 2.0.0
+author: kyoku
+description: ReplayGain 2.0 album and track gain via rsgain
+
+executable: ./replaygain
+hooks: [album.beforePublish]
 timeout: 600s
-# rsgain missing or broken must not cost the user their download.
+# rsgain missing or failing must not cost the user their download.
 required: false
 extensions: [".flac", ".mp3", ".ogg", ".opus", ".m4a"]
+
+permissions:
+  exec: [/usr/bin/rsgain]
+
+config:
+  - key: multithread
+    type: select
+    label: Threads
+    help: Files scanned in parallel.
+    default: MAX
+    options: [MAX, "1", "2", "4"]
+  - key: skipExisting
+    type: bool
+    label: Skip files that already carry ReplayGain
+    help: A resumed or retried download will not rescan what is already tagged.
+    default: true
+  - key: referenceLoudness
+    type: int
+    label: Reference loudness (LUFS)
+    help: 0 keeps rsgain's own default.
+    default: 0
+    min: -30
+    max: -5

@@ -4,9 +4,13 @@ use (
 	./apps/brainz
 	./apps/fs
 	./apps/hub/backend
+	./examples/plugins/hello
+	./examples/plugins/replaygain
 	./packages/downloader
 	./packages/logger
 	./packages/musicbrainz-client
+	./packages/plugin-api
+	./packages/plugin-sdk
 	./packages/validation
 	./proto/gen
 )

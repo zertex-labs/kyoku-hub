@@ -22,6 +22,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/plugins"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
+	api "github.com/zertex-labs/kyoku-hub/packages/plugin-api"
 )
 
 func main() {
@@ -140,7 +141,18 @@ func main() {
 		}
 		agentManager.RequestSync(userID, false)
 	}
-	if registry, err := plugins.NewRegistry(cfg.PluginsDir, log); err != nil {
+	appInfo := api.App{Name: "kyoku-hub", Version: download.AppVersion}
+
+	// Plugin config is encrypted with a key derived from the session secret: a
+	// hub that cannot protect it should not offer the feature at all.
+	var pluginStore plugins.ConfigStore
+	if box, err := plugins.NewSecretBox(cfg.SessionSecret); err != nil {
+		log.Warn("plugin config disabled", zap.Error(err))
+	} else {
+		pluginStore = plugins.NewStore(q, box)
+	}
+
+	if registry, err := plugins.NewRegistry(cfg.PluginsDir, pluginStore, appInfo, log); err != nil {
 		log.Warn("plugins not loaded", zap.String("dir", cfg.PluginsDir), zap.Error(err))
 	} else {
 		downloadManager.SetDispatcher(registry)
