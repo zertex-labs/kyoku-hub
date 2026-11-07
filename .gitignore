@@ -8,3 +8,7 @@ TODO.md
 
 # Local env files
 .env
+
+# compiled example plugins
+examples/plugins/*/replaygain
+examples/plugins/*/hello

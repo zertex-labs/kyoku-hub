@@ -27,9 +27,8 @@ config:
     help: A resumed or retried download will not rescan what is already tagged.
     default: true
   - key: referenceLoudness
-    type: int
+    type: select
     label: Reference loudness (LUFS)
-    help: 0 keeps rsgain's own default.
-    default: 0
-    min: -30
-    max: -5
+    help: rsgain's target loudness; "default" leaves it to rsgain.
+    default: default
+    options: [default, "-23", "-18", "-16", "-14"]

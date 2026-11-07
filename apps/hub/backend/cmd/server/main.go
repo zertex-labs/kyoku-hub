@@ -161,21 +161,28 @@ func main() {
 
 	// Plugin config is encrypted with a key derived from the session secret: a
 	// hub that cannot protect it should not offer the feature at all.
+	var pluginStoreConcrete *plugins.Store
 	var pluginStore plugins.ConfigStore
 	if box, err := plugins.NewSecretBox(cfg.SessionSecret); err != nil {
 		log.Warn("plugin config disabled", zap.Error(err))
 	} else {
-		pluginStore = plugins.NewStore(q, box)
+		pluginStoreConcrete = plugins.NewStore(q, box)
+		pluginStore = pluginStoreConcrete
 	}
 
+	var pluginRegistry *plugins.Registry
 	if registry, err := plugins.NewRegistry(cfg.PluginsDir, pluginStore, appInfo, log); err != nil {
 		log.Warn("plugins not loaded", zap.String("dir", cfg.PluginsDir), zap.Error(err))
 	} else {
+		pluginRegistry = registry
 		downloadManager.SetDispatcher(registry)
 		if n := registry.Count(); n > 0 {
 			log.Info("plugins loaded", zap.Int("count", n), zap.Strings("names", registry.Names()))
 		}
 	}
+
+	pluginHandler := handler.NewPluginHandler(pluginRegistry, pluginStoreConcrete, downloadManager, q)
+	pluginHandler.Register(e.Group("/api/plugins"))
 
 	downloadHandler := handler.NewDownloadHandler(downloadManager, sources, q, log)
 	downloadHandler.Register(e.Group("/api/download"))

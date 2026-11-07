@@ -30,7 +30,7 @@ func main() {
 type config struct {
 	Multithread       string `json:"multithread"`
 	SkipExisting      bool   `json:"skipExisting"`
-	ReferenceLoudness int    `json:"referenceLoudness"`
+	ReferenceLoudness string `json:"referenceLoudness"`
 }
 
 // rsgain's summary ends with a line like "Average Gain:      -13.83 dB".
@@ -47,8 +47,8 @@ func replaygain(ctx context.Context, ev *kyoku.Event) error {
 		// Idempotent: a retried or resumed download does not rescan.
 		args = append(args, "-S")
 	}
-	if cfg.ReferenceLoudness != 0 {
-		args = append(args, "-l", fmt.Sprint(cfg.ReferenceLoudness))
+	if cfg.ReferenceLoudness != "" && cfg.ReferenceLoudness != "default" {
+		args = append(args, "-l", cfg.ReferenceLoudness)
 	}
 	args = append(args, ev.Album.Dir)
 

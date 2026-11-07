@@ -633,76 +633,17 @@ The modal is now the real component: the download page feeds it server snapshots
 mock scenarios stop being useful for edge cases the backend cannot reproduce on demand
 (nothing found, two partials, a track dying mid-album).
 
-## 10. Post-processing and user plugins (built)
+## 10. Post-processing and plugins
 
-Two layers, on purpose.
+In-process processors (tags, cover) run for every download; user plugins are Go
+binaries that receive a JSON payload per hook and run confined by a Landlock
+ruleset. Full reference — manifest, hooks, payload, sandbox, config API — is in
+[`docs/plugins.md`](plugins.md).
 
-**Core processors** (`internal/download/postprocess`) are in-process and always
-run. One interface, one file each:
-
-```go
-type Processor interface {
-    Name() string
-    Process(ctx context.Context, a *Artifact) error
-}
-```
-
-| Processor | File | Does |
-|---|---|---|
-| `Tags` | `postprocess/tags.go` | Vorbis comments in FLAC; other extensions return `Skip` |
-| `Cover` | `postprocess/cover.go` | front-cover PICTURE block, replacing any existing one |
-
-`Artifact` carries path, container, album and track fields, the resolved
-MusicBrainz ids and the cover bytes — everything the download already knows, so a
-processor never queries a provider. The chain runs every processor and collects
-an `Outcome` per step: a failure is a warning and the download continues, a
-`Skip` is reported once per album, and both operations are idempotent because a
-resumed download runs over the same files again.
-
-**User plugins** (`internal/plugins`) are separate processes, loaded from
-`$PLUGINS_DIR` (default `~/.config/kyoku/plugins`):
-
-    plugins/replaygain/
-      plugin.yaml
-      replaygain.sh      # any executable: shell, python, node, a Go binary
-
-    hooks: [track.tagged, album.beforePublish]
-    timeout: 120s
-    required: false
-    extensions: [".flac"]
-
-Hooks: `track.downloaded` (before core tagging), `track.tagged` (after),
-`album.beforePublish` (all files staged, may add files), `album.published`.
-`album.probed` is defined but not dispatched yet.
-
-Protocol: JSON on stdin, JSON or nothing on stdout, exit `0` ok / `3` skip / other
-failure with stderr surfaced in the job log. Only `PATH`, `HOME`, `TMPDIR`,
-`LANG`, `LC_ALL` and `KYOKU_HOOK` / `KYOKU_PLUGIN` / `KYOKU_APP_VERSION` are
-inherited, plus mirrors of the payload fields a shell script needs
-(`KYOKU_ALBUM_DIR`, `KYOKU_ALBUM_TITLE`, `KYOKU_ALBUM_ARTIST`,
-`KYOKU_RELEASE_GROUP_ID`, `KYOKU_TRACK_PATH`, `KYOKU_TRACK_ISRC`) — parsing JSON
-in sh is a barrier nobody should have to cross; the whole process group is killed
-on timeout.
-
-Ships with two examples: `examples/plugins/hello` (minimum viable plugin) and
-`examples/plugins/replaygain` (`rsgain easy -m MAX -S -q "$KYOKU_ALBUM_DIR"` at
-`album.beforePublish`, which is why a downloaded album gets album gain as well as
-track gain).
-
-Why processes and not `plugin` (.so): a Go plugin is locked to the exact toolchain
-and dependency graph of the binary that loads it, so every kyoku rebuild would
-break every installed plugin; it also runs in-process, so a plugin panic takes the
-hub down. A process has no ABI, works in any language, and can be tested by
-piping a payload into it. This is the model Terraform, Packer and Vault use.
-
-Publish moves **everything** that is staged, not only the audio kyoku downloaded,
-so a file a plugin writes at `album.beforePublish` (lyrics, cue, cover variants)
-travels into the library instead of dying with the staging directory. Files a
-plugin adds are diffed out of the staging directory and reported in the log.
-
-`required: true` is the one way a plugin can block: a failure there fails the job
-before publish. Everything else is a warning, always.
-
-Not built yet: a plugins page in settings (list, enable/disable, reorder, test
-run), an install command, and per-plugin settings schemas. The manifest is read
-once at startup, so adding a plugin needs a restart.
+The short version: hooks are `track.downloaded`, `track.tagged`,
+`album.beforePublish`, `album.published`; a plugin declares which it serves and
+is verified with `--describe` before it is enabled; config is typed in the
+manifest, stored encrypted and served to the plugin typed; the sandbox allows
+read-only system paths plus the album directory and one temp dir, and denies all
+TCP. No upload endpoint: a plugin is installed by copying a directory onto the
+server.

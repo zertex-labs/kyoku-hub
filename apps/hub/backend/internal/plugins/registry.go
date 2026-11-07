@@ -45,16 +45,16 @@ const (
 
 // Field is one configuration input.
 type Field struct {
-	Key     string    `yaml:"key"`
-	Type    FieldType `yaml:"type"`
-	Label   string    `yaml:"label"`
-	Help    string    `yaml:"help"`
-	Default any       `yaml:"default"`
-	Options []string  `yaml:"options"`
-	Min     *int      `yaml:"min"`
-	Max     *int      `yaml:"max"`
+	Key     string    `yaml:"key" json:"key"`
+	Type    FieldType `yaml:"type" json:"type"`
+	Label   string    `yaml:"label" json:"label"`
+	Help    string    `yaml:"help" json:"help"`
+	Default any       `yaml:"default" json:"default"`
+	Options []string  `yaml:"options" json:"options"`
+	Min     *int      `yaml:"min" json:"min"`
+	Max     *int      `yaml:"max" json:"max"`
 	// Required makes an unset value a startup error rather than an empty string.
-	Required bool `yaml:"required"`
+	Required bool `yaml:"required" json:"required"`
 }
 
 // Permissions is what a plugin asks for. Requests are shown to the admin; the
@@ -62,9 +62,9 @@ type Field struct {
 // expressed here.
 type Permissions struct {
 	// Exec is the list of binaries this plugin may run, by absolute path.
-	Exec []string `yaml:"exec"`
+	Exec []string `yaml:"exec" json:"exec"`
 	// Net is the list of hosts this plugin may reach. Empty means no network.
-	Net []string `yaml:"net"`
+	Net []string `yaml:"net" json:"net"`
 }
 
 // Manifest is plugin.yaml.
@@ -255,6 +255,9 @@ func (m *Manifest) validate(dirName string) error {
 		if f.Type == FieldSelect && len(f.Options) == 0 {
 			return fmt.Errorf("config field %q is a select with no options", f.Key)
 		}
+		if err := validateDefault(f); err != nil {
+			return err
+		}
 	}
 
 	for _, b := range m.Permissions.Exec {
@@ -263,6 +266,56 @@ func (m *Manifest) validate(dirName string) error {
 		}
 	}
 	return nil
+}
+
+// validateDefault catches the case where a manifest's own default violates its
+// own bounds - which shipped once as a reference loudness of 0 under a max of -5,
+// making the plugin unsaveable from the settings page.
+func validateDefault(f Field) error {
+	if f.Default == nil {
+		return nil
+	}
+	switch f.Type {
+	case FieldInt:
+		v, ok := toInt(f.Default)
+		if !ok {
+			return fmt.Errorf("config field %q default is not a number", f.Key)
+		}
+		if f.Min != nil && v < *f.Min {
+			return fmt.Errorf("config field %q default %d is below min %d", f.Key, v, *f.Min)
+		}
+		if f.Max != nil && v > *f.Max {
+			return fmt.Errorf("config field %q default %d is above max %d", f.Key, v, *f.Max)
+		}
+	case FieldBool:
+		if _, ok := f.Default.(bool); !ok {
+			return fmt.Errorf("config field %q default is not a boolean", f.Key)
+		}
+	case FieldSelect:
+		s, ok := f.Default.(string)
+		if !ok {
+			return fmt.Errorf("config field %q default is not a string", f.Key)
+		}
+		for _, opt := range f.Options {
+			if opt == s {
+				return nil
+			}
+		}
+		return fmt.Errorf("config field %q default %q is not one of its options", f.Key, s)
+	}
+	return nil
+}
+
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
 
 // rejectShellScript keeps the plugin surface to compiled binaries. A script is
