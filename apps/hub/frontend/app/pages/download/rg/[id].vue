@@ -54,24 +54,12 @@ const downloads = useDownloadStore();
 // Cover Art Archive keys covers by release group, which is the release the user
 // clicked. Not every group has one: the image hides itself on a 404 rather than
 // leaving a broken frame.
-const rgCover = `https://coverartarchive.org/release-group/${rgId}/front-250`;
+const rgCover = `https://coverartarchive.org/release-group/${rgId}/front-500`;
 const rgCoverFailed = ref(false);
+// Cover Art Archive redirects to archive.org and can take seconds; an empty frame
+// reads as "no artwork", so the square pulses until the image lands.
+const rgCoverLoaded = ref(false);
 
-// The reference is useful while hunting for the right edition and noise once you
-// have it, so it collapses. The choice is remembered: nobody wants to fold the
-// same panel away on every release.
-const showRef = ref(true);
-const REF_KEY = "kyoku.download.showReference";
-
-onMounted(() => {
-  const saved = localStorage.getItem(REF_KEY);
-  if (saved !== null) showRef.value = saved === "1";
-});
-
-function toggleRef() {
-  showRef.value = !showRef.value;
-  localStorage.setItem(REF_KEY, showRef.value ? "1" : "0");
-}
 
 // The walk runs on the server: clicking a card hands it the release-group
 // metadata and the album the user pointed at, then the modal takes over.
@@ -105,72 +93,75 @@ async function startDownload(result: SearchResult) {
       Back
     </button>
 
-    <div class="flex items-start">
-      <div class="min-w-0 flex-1">
+    <div>
         <!-- Header -->
-        <div class="mb-6 flex items-start justify-between gap-4">
+        <div class="mb-6 flex items-start justify-between gap-6">
           <div>
             <h1 class="text-xl font-semibold text-white">Choose a release to download</h1>
             <p v-if="titleParam" class="text-sm text-gray-400 mt-1">
               {{ titleParam }}<span v-if="artistParam" class="text-gray-600"> · {{ artistParam }}</span>
             </p>
-          </div>
-          <button
-            v-if="rgCover"
-            class="hidden lg:inline-flex items-center gap-1.5 shrink-0 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
-            :class="
-              showRef
-                ? 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
-                : 'border-orange-500/40 bg-orange-500/10 text-orange-300'
-            "
-            :aria-expanded="showRef"
-            @click="toggleRef"
-          >
-            <Icon
-              :name="showRef ? 'lucide:panel-right-close' : 'lucide:panel-right-open'"
-              class="w-3.5 h-3.5"
-            />
-            {{ showRef ? "Hide reference" : "Show reference" }}
-          </button>
-        </div>
 
-    <!-- Agent picker (only when multiple connected) -->
-    <div v-if="connectedAgents.length > 0" class="mb-6">
-      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-        Download destination
-      </p>
-      <div class="flex flex-wrap gap-2">
-        <button
-          v-for="agent in connectedAgents"
-          :key="agent.id"
-          class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
-          :class="
-            selectedAgentId === agent.id
-              ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
-              : 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
-          "
-          @click="selectedAgentId = agent.id"
-        >
-          <span
-            class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-            :class="selectedAgentId === agent.id ? 'bg-orange-400' : 'bg-green-400'"
-          />
-          {{ agent.label || "Unnamed agent" }}
-        </button>
-        <button
-          v-if="connectedAgents.length > 1"
-          class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
-          :class="
-            selectedAgentId === null
-              ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
-              : 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
-          "
-          @click="selectedAgentId = null"
-        >
-          All agents
-        </button>
-      </div>
-    </div>
+                <div v-if="connectedAgents.length > 0" class="mt-5">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+            Download destination
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="agent in connectedAgents"
+              :key="agent.id"
+              class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
+              :class="
+                selectedAgentId === agent.id
+                  ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
+                  : 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
+              "
+              @click="selectedAgentId = agent.id"
+            >
+              <span
+                class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                :class="selectedAgentId === agent.id ? 'bg-orange-400' : 'bg-green-400'"
+              />
+              {{ agent.label || "Unnamed agent" }}
+            </button>
+            <button
+              v-if="connectedAgents.length > 1"
+              class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors"
+              :class="
+                selectedAgentId === null
+                  ? 'border-orange-500/50 bg-orange-500/10 text-orange-300'
+                  : 'border-white/10 bg-white/5 text-gray-400 hover:text-white hover:border-white/20'
+              "
+              @click="selectedAgentId = null"
+            >
+              All agents
+            </button>
+          </div>
+        </div>
+          </div>
+          <div
+            v-if="rgCover"
+            class="relative w-[250px] h-[250px] shrink-0 rounded-lg overflow-hidden border border-white/10 bg-white/[0.03]"
+          >
+            <!-- The image has to be in the DOM to load at all: an v-else-if behind
+                 the skeleton never mounts, so it never fires @load. -->
+            <img
+              v-if="!rgCoverFailed"
+              :src="rgCover"
+              :alt="titleParam"
+              class="w-full h-full object-cover"
+              @load="rgCoverLoaded = true"
+              @error="rgCoverFailed = true"
+            />
+            <div v-else class="w-full h-full flex items-center justify-center">
+              <Icon name="lucide:disc-3" class="w-6 h-6 text-gray-700" />
+            </div>
+            <div
+              v-if="!rgCoverLoaded && !rgCoverFailed"
+              class="absolute inset-0 animate-pulse bg-white/[0.06]"
+            />
+          </div>
+        </div>
 
     <!-- Loading -->
     <div v-if="status === 'pending'" class="space-y-6">
@@ -301,42 +292,6 @@ async function startDownload(result: SearchResult) {
     </div>
 
       </div>
-
-      <!-- The release the user came from: the provider presents its own artwork,
-           and the same album can ship a dozen covers. Comparing against this one
-           is how you pick the actual release. -->
-      <aside
-        v-if="rgCover"
-        class="hidden lg:block shrink-0 sticky top-6 overflow-hidden transition-all duration-300 ease-out"
-        :style="{
-          width: showRef ? '15rem' : '0rem',
-          marginLeft: showRef ? '2rem' : '0rem',
-          opacity: showRef ? 1 : 0,
-        }"
-      >
-        <div class="w-60">
-        <div class="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-white/[0.03]">
-          <img
-            v-if="!rgCoverFailed"
-            :src="rgCover"
-            :alt="titleParam"
-            class="w-full h-full object-cover"
-            @error="rgCoverFailed = true"
-          />
-          <div v-else class="absolute inset-0 flex items-center justify-center">
-            <Icon name="lucide:disc-3" class="w-12 h-12 text-gray-700" />
-          </div>
-        </div>
-        <p class="mt-3 text-xs font-medium text-white leading-snug">
-          {{ titleParam || "This release" }}
-        </p>
-        <p class="text-[11px] text-gray-500 mt-0.5">{{ artistParam }}</p>
-        <p class="text-[10px] text-gray-600 mt-2 leading-relaxed">
-          Compare it with the releases on the left.
-        </p>
-        </div>
-      </aside>
-    </div>
 
     <!-- Reopen affordance: the job outlives the modal -->
     <button
