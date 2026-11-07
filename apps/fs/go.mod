@@ -7,8 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v4 v4.15.2
-	github.com/labstack/gommon v0.5.0
-github.com/zertex-labs/kyoku-hub/proto/gen v0.0.0-00010101000000-000000000000
+	github.com/zertex-labs/kyoku-hub/proto/gen v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.28.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.52.0
@@ -17,6 +16,7 @@ github.com/zertex-labs/kyoku-hub/proto/gen v0.0.0-00010101000000-000000000000
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

@@ -15,13 +15,12 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
-	"github.com/zertex-labs/kyoku-hub/packages/downloader"
-	"github.com/zertex-labs/kyoku-hub/packages/downloader/tidal"
 )
 
 func main() {
@@ -129,20 +128,22 @@ func main() {
 	fsSyncHandler := handler.NewFsSyncHandler(q, agentManager)
 	fsSyncHandler.Register(e.Group("/api/fs"))
 
-	// Downloader — optional; handler returns 503 when no providers configured
-	providers := map[string]downloader.Provider{}
-	if cfg.TidalToken != "" {
-		providers["tidal"] = tidal.New(tidal.Auth{
-			Token:        cfg.TidalToken,
-			RefreshToken: cfg.TidalRefreshToken,
-			CountryCode:  cfg.TidalCountryCode,
-			UserID:       cfg.TidalUserID,
-			ExpiresAt:    cfg.TidalExpiresAt,
-		}, downloader.DefaultConfig())
-		log.Info("tidal downloader configured")
+	// Downloader — optional; the handler returns 503 when the user has no sources
+	// connected. Sources come from provider_credentials, so the walk is per user.
+	sources := handler.SourceResolver(q, log)
+	downloadManager := download.NewManager(cfg.DownloadDir, sources, sseManager, handler.NewJobStore(q), log)
+	downloadManager.OnPublish = func(userID, agentID string) {
+		if agentID != "" {
+			agentManager.RequestSyncAgent(userID, agentID, false)
+			return
+		}
+		agentManager.RequestSync(userID, false)
 	}
-	downloadHandler := handler.NewDownloadHandler(sseManager, providers, cfg.DownloadDir, q, agentManager, log)
+	downloadHandler := handler.NewDownloadHandler(downloadManager, sources, q, log)
 	downloadHandler.Register(e.Group("/api/download"))
+
+	connectionsHandler := handler.NewConnectionsHandler(q)
+	connectionsHandler.Register(e.Group("/api/connections"))
 
 	log.Info("starting hub backend", zap.String("port", cfg.Port))
 	if err := e.Start(":" + cfg.Port); err != nil && err != http.ErrServerClosed {

@@ -1,144 +1,227 @@
 package handler
 
 import (
-	"context"
 	"net/http"
-	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/fsagent"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
 )
 
+// DownloadHandler owns the download API: provider search for the release-group
+// page, and the job endpoints the modal drives.
+//
+// The walk itself lives in internal/download.Manager — the handler only starts
+// jobs, answers decisions and reads snapshots. Keeping the loop out of the
+// request path is what makes a job survive the browser tab that started it.
 type DownloadHandler struct {
-	sse          *sse.Manager
-	providers    map[string]downloader.Provider
-	downloadDir  string
-	queries      *queries.Queries
-	agentManager *fsagent.Manager
-	logger       *zap.Logger
+	jobs    *download.Manager
+	sources download.SourceResolver
+	queries *queries.Queries
+	logger  *zap.Logger
 }
 
 func NewDownloadHandler(
-	sseManager *sse.Manager,
-	providers map[string]downloader.Provider,
-	downloadDir string,
+	jobs *download.Manager,
+	sources download.SourceResolver,
 	q *queries.Queries,
-	am *fsagent.Manager,
 	log *zap.Logger,
 ) *DownloadHandler {
-	return &DownloadHandler{
-		sse:          sseManager,
-		providers:    providers,
-		downloadDir:  downloadDir,
-		queries:      q,
-		agentManager: am,
-		logger:       log,
-	}
+	return &DownloadHandler{jobs: jobs, sources: sources, queries: q, logger: log}
 }
 
 func (h *DownloadHandler) Register(g *echo.Group) {
-	g.GET("/rg/:rgId/search", h.SearchProviders, mw.AuthRequired(h.queries))
-	g.POST("/rg/:rgId", h.DownloadReleaseGroup, mw.AuthRequired(h.queries))
+	g.GET("/rg/:rgId/search", h.Search, mw.AuthRequired(h.queries))
+
+	g.POST("/jobs", h.StartJob, mw.AuthRequired(h.queries))
+	g.GET("/jobs", h.ListJobs, mw.AuthRequired(h.queries))
+	g.GET("/jobs/:id", h.GetJob, mw.AuthRequired(h.queries))
+	g.POST("/jobs/:id/decide", h.DecideJob, mw.AuthRequired(h.queries))
+	g.POST("/jobs/:id/cancel", h.CancelJob, mw.AuthRequired(h.queries))
 }
 
-func (h *DownloadHandler) SearchProviders(c echo.Context) error {
-	if len(h.providers) == 0 {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no download providers configured"})
-	}
+// Search fans out over the caller's sources and merges the results.
+//
+// `artist` and `title` describe the release group the user came from. Provider
+// search is loose — "Ado DND" also returns adonä, Noir and You'll Never Get To
+// Heaven — so results by another artist are dropped and the rest are ordered by
+// how close the title is. A picker listing six different artists is not a
+// catalogue, it is a search engine with no context.
+func (h *DownloadHandler) Search(c echo.Context) error {
+	user := c.Get("user").(*model.User)
 	q := c.QueryParam("q")
+	artist := strings.TrimSpace(c.QueryParam("artist"))
+	title := strings.TrimSpace(c.QueryParam("title"))
+	// Escape hatch: two spellings of one artist ("Ye" / "Kanye West") would
+	// otherwise hide every result with no way back.
+	includeOthers := c.QueryParam("others") == "1"
+	if q == "" && artist != "" {
+		q = strings.TrimSpace(artist + " " + title)
+	}
 	if q == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing query parameter 'q'"})
 	}
 
-	type providerResult struct {
-		results []downloader.SearchResult
-		err     error
-	}
-	ch := make(chan providerResult, len(h.providers))
-	for _, p := range h.providers {
-		go func(p downloader.Provider) {
-			res, err := p.SearchAlbum(q)
-			ch <- providerResult{res, err}
-		}(p)
+	sources := h.sources(c.Request().Context(), user.ID)
+	if len(sources) == 0 {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no download sources configured"})
 	}
 
-	var all []downloader.SearchResult
-	for range h.providers {
+	ctx := c.Request().Context()
+	type result struct {
+		items []downloader.SearchResult
+		err   error
+	}
+	ch := make(chan result, len(sources))
+	for _, src := range sources {
+		go func(s downloader.Source) {
+			items, err := s.SearchAlbums(ctx, q)
+			ch <- result{items, err}
+		}(src)
+	}
+
+	all := make([]downloader.SearchResult, 0, 20)
+	for range sources {
 		r := <-ch
 		if r.err != nil {
 			h.logger.Warn("provider search error", zap.String("q", q), zap.Error(r.err))
 			continue
 		}
-		all = append(all, r.results...)
+		all = append(all, r.items...)
 	}
-	h.logger.Info("search complete", zap.String("q", q), zap.Int("results", len(all)))
 
+	if artist != "" && !includeOthers {
+		all = rankResults(all, artist, title)
+	}
 	if all == nil {
 		all = []downloader.SearchResult{}
 	}
 	return c.JSON(http.StatusOK, all)
 }
 
-type downloadRGRequest struct {
-	Provider string `json:"provider"`
-	AlbumID  string `json:"album_id"`
-	AgentID  string `json:"agent_id,omitempty"`
+type startJobRequest struct {
+	RGID    string             `json:"rg_id"`
+	Album   download.AlbumView `json:"album"`
+	AgentID string             `json:"agent_id"`
+	Mode    string             `json:"mode"`
+	Chain   []string           `json:"chain"`
+
+	PreferredProvider string `json:"provider"`
+	PreferredAlbumID  string `json:"album_id"`
 }
 
-func (h *DownloadHandler) DownloadReleaseGroup(c echo.Context) error {
-	rgID := c.Param("rgId")
+// StartJob creates the job and returns its first snapshot. The walk runs in the
+// background and streams over SSE (`download:job`).
+func (h *DownloadHandler) StartJob(c echo.Context) error {
 	user := c.Get("user").(*model.User)
 
-	var req downloadRGRequest
-	if err := c.Bind(&req); err != nil || req.Provider == "" || req.AlbumID == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing provider or album_id"})
+	var req startJobRequest
+	if err := c.Bind(&req); err != nil || req.RGID == "" || req.Album.Title == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing rg_id or album"})
 	}
 
-	p, ok := h.providers[req.Provider]
-	if !ok {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "provider not configured: " + req.Provider})
-	}
+	job, err := h.jobs.Start(c.Request().Context(), user.ID, req.RGID, download.StartRequest{
+		Album:   req.Album,
+		AgentID: req.AgentID,
+		Mode:    req.Mode,
+		Chain:   req.Chain,
 
-	go h.runDownload(rgID, p, req.AlbumID, user.ID, req.AgentID)
-	return c.JSON(http.StatusAccepted, map[string]string{"status": "queued"})
-}
-
-func (h *DownloadHandler) runDownload(rgID string, p downloader.Provider, albumID, userID, agentID string) {
-	destDir := filepath.Join(h.downloadDir, rgID, albumID)
-
-	broadcast := func(phase string, track, total int) {
-		h.sse.Broadcast("download:progress", map[string]interface{}{
-			"rg_id": rgID,
-			"phase": phase,
-			"track": track,
-			"total": total,
-		})
-	}
-
-	err := p.DownloadAlbum(context.Background(), albumID, destDir, func(phase string, n, total int) {
-		broadcast(phase, n, total)
+		PreferredProvider: req.PreferredProvider,
+		PreferredAlbumID:  req.PreferredAlbumID,
 	})
 	if err != nil {
-		h.logger.Error("download failed", zap.String("rg_id", rgID), zap.String("album_id", albumID), zap.Error(err))
-		h.sse.Broadcast("download:progress", map[string]interface{}{
-			"rg_id": rgID,
-			"phase": "error",
-			"error": err.Error(),
-		})
-		return
+		status := http.StatusBadRequest
+		if err.Error() == "no download sources configured" {
+			status = http.StatusServiceUnavailable
+		}
+		return c.JSON(status, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusAccepted, job)
+}
+
+func (h *DownloadHandler) ListJobs(c echo.Context) error {
+	user := c.Get("user").(*model.User)
+	return c.JSON(http.StatusOK, h.jobs.List(user.ID))
+}
+
+func (h *DownloadHandler) GetJob(c echo.Context) error {
+	user := c.Get("user").(*model.User)
+	job, ok := h.jobs.Get(user.ID, c.Param("id"))
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "job not found"})
+	}
+	return c.JSON(http.StatusOK, job.Snapshot())
+}
+
+func (h *DownloadHandler) DecideJob(c echo.Context) error {
+	user := c.Get("user").(*model.User)
+
+	var req struct {
+		Choice string `json:"choice"`
+	}
+	if err := c.Bind(&req); err != nil || req.Choice == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing choice"})
+	}
+	if err := h.jobs.Decide(user.ID, c.Param("id"), req.Choice); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	h.logger.Info("download complete", zap.String("rg_id", rgID), zap.String("agent_id", agentID))
-	if agentID != "" {
-		h.agentManager.RequestSyncAgent(userID, agentID, false)
-	} else {
-		h.agentManager.RequestSync(userID, false)
+	job, ok := h.jobs.Get(user.ID, c.Param("id"))
+	if !ok {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	}
+	return c.JSON(http.StatusOK, job.Snapshot())
+}
+
+func (h *DownloadHandler) CancelJob(c echo.Context) error {
+	user := c.Get("user").(*model.User)
+	if err := h.jobs.Cancel(user.ID, c.Param("id")); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// rankResults drops results by another artist and orders the rest: exact title
+// first, then the ones that only add a deluxe/remaster suffix, then everything
+// else. Version markers (remix, instrumental, sped up) sort below the album.
+func rankResults(items []downloader.SearchResult, artist, title string) []downloader.SearchResult {
+	// No reference artist means no basis to drop anything: a caller that cannot
+	// tell us who the album is by should still get every result.
+	if artist == "" {
+		return items
+	}
+
+	kept := make([]downloader.SearchResult, 0, len(items))
+	for _, it := range items {
+		if downloader.ArtistMatches(artist, it.Artist) {
+			kept = append(kept, it)
+		}
+	}
+
+	sort.SliceStable(kept, func(i, j int) bool {
+		ri, rj := scoreResult(kept[i], title), scoreResult(kept[j], title)
+		if ri != rj {
+			return ri > rj
+		}
+		return kept[i].Title < kept[j].Title
+	})
+	return kept
+}
+
+func scoreResult(it downloader.SearchResult, title string) int {
+	if title == "" {
+		return 0
+	}
+	score := downloader.TitleRank(title, it.Title)
+	if downloader.NoisyRelease(title, it.Title) {
+		score -= 40
+	}
+	return score
 }

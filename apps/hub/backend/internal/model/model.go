@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID        string    `json:"id"`
@@ -34,6 +37,26 @@ const (
 	RGStateBad     ReleaseGroupState = "BAD"
 	RGStateMissing ReleaseGroupState = "MISSING"
 )
+
+// DownloadJob is the persisted record of a download run. Payload is the full
+// job snapshot the frontend renders, so history and live state share one shape.
+type DownloadJob struct {
+	ID        string          `json:"id"`
+	UserID    string          `json:"user_id"`
+	RGID      string          `json:"rg_id"`
+	Status    string          `json:"status"`
+	Payload   json.RawMessage `json:"payload"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type ProviderCredential struct {
+	UserID          string    `json:"user_id"`
+	Provider        string    `json:"provider"`
+	CredentialsJSON string    `json:"-"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
 
 type Artist struct {
 	MBArtistID        string     `json:"mb_artist_id"`

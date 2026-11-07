@@ -14,8 +14,8 @@ type Config struct {
 	DatabaseURL             string
 	MusicBrainzClientID     string
 	MusicBrainzClientSecret string
-	BaseURL                 string   // Backend base URL (for OAuth redirect)
-	FrontendURL             string   // Frontend URL (for CORS + post-login redirect)
+	BaseURL                 string // Backend base URL (for OAuth redirect)
+	FrontendURL             string // Frontend URL (for CORS + post-login redirect)
 	SessionSecret           string
 	BrainzWSURL             string   // Brainz WS endpoint URL
 	BrainzAPIURL            string   // Brainz HTTP API base URL
