@@ -1,26 +1,38 @@
 # Navidrome support
 
 How kyoku can know what a Navidrome library already holds, and how a download can
-end up in it, without mounting anybody's storage.
+end up in it.
 
-## The problem with pointing the fs agent at the folder
+**Where this runs matters more than what it calls.** The integration belongs in
+the *fs agent*, not the hub: the agent is the component people deploy next to
+Navidrome, on the host that has the files. The hub only needs to know the
+outcome.
 
-It looks like the cheap answer and it hides three things:
+## Who holds what
 
-1. **The agent has to be able to write.** Re-tagging rewrites files in place. If
-   the agent mounts Navidrome's music volume read-only (the safe way to mount
-   someone else's library), the whole re-tag feature stops working there.
-2. **It assumes the same machine or a shared mount.** In a homelab the hub, the
-   agent and Navidrome are usually three containers on two hosts. NFS/SSHFS is
-   more moving parts than an HTTP call, and a dead mount looks exactly like an
-   empty library.
-3. **It answers the wrong question.** "Is this album in my library?" is a
-   question Navidrome has already answered, with MusicBrainz ids, for every
-   album it scanned. Re-deriving it by walking files duplicates work and gets
-   different answers when the two tag readers disagree.
+Three components, three jobs:
 
-The folder is still the right place for *writes* (kyoku publishes into a folder
-Navidrome watches). It is the wrong place for *reads*.
+| component | where it lives | what it does |
+| --- | --- | --- |
+| hub | anywhere | decides what to fetch, stores jobs and state |
+| fs agent | next to the files, usually the Navidrome host | reads tags, writes tags, knows the paths, talks to Navidrome |
+| Navidrome | the media host | plays the library, scans folders it watches |
+
+So the integration is **agent-side**: the agent already scans the library, already
+has a hub connection, and is the only component that can both rewrite a file and
+tell Navidrome about it. Credentials stay on the media host; Navidrome never has
+to be reachable from the hub (which in a homelab is often behind a different
+network anyway).
+
+The one thing that does not hold today: the hub is still what downloads and
+writes files (`DOWNLOAD_DIR`). Hosting the agent next to Navidrome therefore gets
+you correct *reads* immediately, and correct *writes* only when either
+
+- the hub's `DOWNLOAD_DIR` is a volume the agent also mounts (the current
+  deployment assumption), or
+- the download moves to the agent (topology C in `downloader-plan.md`: the hub
+  resolves a ticket, the agent fetches the bytes). That is the real end state and
+  the reason this integration is worth putting on the agent now.
 
 ## What Navidrome actually exposes
 
@@ -81,11 +93,18 @@ version detection needed: ask for the target, live with the fallback.
 
 ## Design
 
-Two directions, one credential.
+Two directions, one component
 
-### Read: a library connector
+### Read: the agent reports, the hub stores
 
-Not an fs agent. A `library_albums` table holding what Navidrome reports:
+The agent already walks the configured `SCAN_DIRS` and reports every track with
+its release-group id — that is the "what do I already have" answer, and it needs
+no Navidrome API at all. What the API adds is what the files cannot say: albums
+Navidrome knows about that the agent's scan roots do not cover, and the
+per-library folder mapping needed to ask for a scan of one directory.
+
+Optional, therefore: a `library_albums` table holding what Navidrome reports,
+filled by the agent when it is configured with Navidrome credentials.
 
 ```sql
 CREATE TABLE library_albums (
@@ -117,52 +136,52 @@ tools that write no MusicBrainz ids, and so does kyoku. For those, fall back to
 and mark the row `matched_by = 'artist_title'` so the UI can be honest that it is
 a guess.
 
-### Write: publish, then ask for a scan
+### Write: publish, then ask Navidrome to look
 
-After `album.published`:
+1. A publish or a re-tag changes files the agent can see.
+2. The hub sends the changed paths along with its usual "rescan" request
+   (`SyncRequest.changed`), instead of a bare `full=false`.
+3. The agent maps each path onto a Navidrome library (`GET /api/library` gives
+   id + root) and calls `startScan` with `target=<libraryID>:<relative path>`.
+4. No target match, or an older Navidrome that ignores targets: fall back to a
+   full `startScan`, and say which one happened in the job log.
 
-1. kyoku publishes into `DOWNLOAD_DIR`, which is a folder Navidrome watches.
-2. Hub calls `startScan?target=<absolute path>` (admin credentials).
-3. Nothing else. No rescan of the whole library, no waiting for a poll interval.
-
-If the folder is *not* on Navidrome's side (different host without a shared
-volume), the targeted scan returns "not under any library" and the log says so —
-that is a configuration mistake worth surfacing, not hiding.
+`startScan` is admin-only, so the agent needs an admin account. Reads work with
+any account, which is what "Test connection" should report.
 
 ### Credentials
 
-One Navidrome account with admin rights (scan is admin-only). Stored like the
-Deezer ARL: an encrypted row in `provider_credentials`, never sent to the
-frontend, never logged. A non-admin account works for reads only — say so in the
-settings form rather than failing at scan time.
+Agent config, not hub config: `NAVIDROME_URL`, `NAVIDROME_USER`,
+`NAVIDROME_PASS`. They never leave the media host, which is also where they are
+useful — the hub has no reason to hold them, and cannot reach the instance in
+most deployments anyway.
 
-## Settings
+## Agent config
 
-Settings → Connections, next to Deezer:
-
+```bash
+NAVIDROME_URL=https://music.example.lan
+NAVIDROME_USER=kyoku
+NAVIDROME_PASS=…
+# optional: only scan the folder that changed, when Navidrome supports targets
+NAVIDROME_TARGET_SCAN=true
 ```
-Navidrome URL      https://music.example.lan
-Username           kyoku
-Password           ••••••••
-[Test connection]   → "412 albums · admin · scanned 3 minutes ago"
-```
 
-The test button is one `/api/album?_start=0&_end=1` plus `getScanStatus`, which
-answers everything the user needs to know before trusting it.
+The agent logs the mapping it derived on the first request ("library 1 · /music ·
+target Music/aespa/LEMONADE") and then stays quiet.
 
 ## Phases
 
 | phase | what | why first |
 | --- | --- | --- |
-| 1 | Navidrome client + login + paged album sync into `library_albums`, shown as "in Navidrome" on the album grid | answers the actual question; read-only, cannot break anything |
-| 2 | Ownership union in `GetArtistReleaseGroups` / `CountOwned` | makes the grid correct instead of duplicated |
-| 3 | Per-album song fetch → quality, so "check for better" compares against Navidrome | turns a boolean into a decision |
-| 4 | `startScan` after publish, targeted when supported | closes the loop |
-| 5 | (optional) Subsonic-only fallback for other servers | portability, not needed for a homelab |
+| 1 | `SyncRequest.changed` paths: hub sends what it touched, agent keeps them | tiny, and both later phases need it |
+| 2 | Agent-side Navidrome client: login, `GET /api/library`, `startScan` with a target, full-scan fallback | closes the loop: tag a file, Navidrome sees it |
+| 3 | Agent reports Navidrome's album list too (`/api/album` paged), for libraries whose roots the agent does not scan | covers the "my agent only sees part of the library" case |
+| 4 | Per-album songs → quality, so "check for better" compares against Navidrome | turns a boolean into a decision |
+| 5 | Move publish and tagging to the agent (topology C) | the real fix for remote agents; make it unnecessary to share volumes |
 
-Rough size: client and auth ~200 lines with tests, sync job ~200, ownership union
-~60, settings form ~80, scan trigger ~60. Phase 1–2 is a day's work; nothing here
-touches the download pipeline.
+Rough size: paths ~40 lines, agent client ~200 with tests, album sync ~200,
+quality ~80. Phases 1–2 are the useful half and do not touch the download
+pipeline.
 
 ## Open questions
 
