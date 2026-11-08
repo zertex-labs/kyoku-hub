@@ -21,6 +21,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
 	postprocess "github.com/zertex-labs/kyoku-hub/packages/tagwriter"
+	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
 // SourceResolver is how the manager gets the caller's configured sources. It is
@@ -50,6 +51,7 @@ type Manager struct {
 	post     *postprocess.Chain // post-download steps, in order
 	dispatch Dispatcher         // user-installed plugins; nil means none
 	opts     settings.Provider  // the user's tagger options; nil means the defaults
+	filer    Filer              // the agent that writes to the user's disk
 
 	// OnPublish is called after a batch lands in the library, so the caller can
 	// ask the right fs agent to rescan. Optional; nil-safe.
@@ -79,6 +81,15 @@ func NewManager(
 		post:    postprocess.Default(),
 	}
 }
+
+// Filer is the agent-side half of a download: the hub works out what the album
+// is, the agent puts it on the disk.
+type Filer interface {
+	MakeAlbum(ctx context.Context, userID, agentID string, album *fspb.WriteAlbum, onEvent func(*fspb.WriteEvent)) error
+}
+
+// SetFiler installs the thing that can reach an agent.
+func (m *Manager) SetFiler(f Filer) { m.filer = f }
 
 // SetSettings installs the user's tagger options. Without it the manager behaves
 // as it did before the options existed: everything on.
@@ -383,12 +394,6 @@ func (m *Manager) results(job *Job) {
 
 // download fetches every track of a picked album into staging, then publishes.
 func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
-	staging := filepath.Join(m.root, ".staging", job.ID)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
-		m.fail(job, "cannot create staging dir: "+err.Error())
-		return
-	}
-
 	// MusicBrainz artwork of the tags, resolved in the background at 1 req/s
 	// while the audio downloads. Best-effort: no network, no MB tags.
 	mb := m.resolveMB(ctx, job.RGID, job.Album.ReleaseID, pick.cand)
@@ -398,134 +403,146 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 		job.log("warn", err)
 	}
 
-	// The album's tagger options: what to write into the files themselves.
-	opts := m.options(job)
-
-	// One cover download for the whole album: embedded in every track and written
-	// beside them. Best-effort — missing art must not fail a download.
+	// One cover download for the whole album. The hub fetches it because it is
+	// small, and because the artwork URL is a provider detail the agent has no
+	// business knowing.
 	cover, err := m.fetchCover(job.Album.Cover)
 	if err != nil {
 		job.log("warn", "cover art: "+err.Error())
 	}
-	if opts.WriteCoverFile {
-		if err := WriteCover(staging, cover); err != nil {
-			job.log("warn", "could not write cover.jpg: "+err.Error())
-		}
-	}
 
+	opts := m.options(job)
 	chain := m.chain(opts)
 	for _, line := range metadataLines(job, pick.cand, mb, cover, chain, opts) {
 		job.log("info", line)
 	}
-	if names := m.pluginNames(); len(names) > 0 {
-		job.log("info", "plugins · "+strings.Join(names, ", "))
+
+	// The hub resolves what to fetch; the agent fetches it. Anything the hub did
+	// to a file itself — staging, tagging, renaming into the library — was only
+	// ever possible because the two happened to share a disk.
+	ticketer, ok := pick.source.(downloader.Ticketer)
+	if !ok {
+		m.fail(job, "this source cannot hand out download tickets")
+		return
+	}
+	if m.filer == nil {
+		m.fail(job, "no agent is connected, so there is nowhere to put the files")
+		return
 	}
 
-	tracks := pick.cand.Tracks
-	job.mu.Lock()
-	job.Phase = PhaseDownloading
-	job.Progress = &Progress{Total: len(tracks)}
-	job.mu.Unlock()
-	m.broadcast(job)
+	album := &fspb.WriteAlbum{
+		JobId:          job.ID,
+		Kind:           "download",
+		AlbumTitle:     job.Album.Title,
+		AlbumArtist:    job.Album.Artist,
+		StagingRel:     filepath.ToSlash(filepath.Join(".staging", job.ID)),
+		LibraryRel:     filepath.ToSlash(AlbumDir(job.Album.Artist, job.Album.Title, atoi(job.Album.Year))),
+		Cover:          cover,
+		EmbedCover:     opts.EmbedCover,
+		WriteCoverFile: opts.WriteCoverFile,
+		ScanAfter:      true,
+	}
 
-	var (
-		written  []string
-		totalLen int64
-		skips    = map[string]bool{}
-	)
-	for i := 0; i < len(tracks); i++ {
-		tr := tracks[i]
+	total := len(pick.cand.Tracks)
+	for _, tr := range pick.cand.Tracks {
 		if ctx.Err() != nil {
 			m.fail(job, "cancelled")
 			return
 		}
-
 		ext := extFor(tr.Quality)
 		name := TrackFileName(tr.Disc, tr.Number, tr.Title, ext)
-		dest := filepath.Join(staging, name)
 
-		job.setProgress(i, fmt.Sprintf("t%02d %s", tr.Number, tr.Title))
-		m.broadcast(job)
-
-		delivered, err := pick.source.DownloadTrack(ctx, pick.albumID, tr.ProviderID, dest)
-		if err == nil {
-			err = VerifyAudio(dest)
-		}
+		ticket, err := ticketer.TrackTicket(ctx, pick.albumID, tr.ProviderID)
 		if err != nil {
-			job.log("error", fmt.Sprintf("t%02d %q: %v", tr.Number, tr.Title, err))
-			m.broadcast(job)
-
-			switch m.awaitDecision(ctx, job, Decision{
-				Kind:  "track_failed",
-				Title: fmt.Sprintf("t%02d %q failed", tr.Number, tr.Title),
-				Body:  err.Error() + ". Skipping leaves the album incomplete; retrying asks the source again.",
-				Options: []DecisionOption{
-					{ID: "skip", Label: "Skip track", Tone: "primary"},
-					{ID: "retry", Label: "Retry", Tone: "ghost"},
-					{ID: "cancel", Label: "Cancel", Tone: "danger"},
-				},
-			}) {
-			case "skip":
-				_ = os.Remove(dest)
-				job.log("warn", fmt.Sprintf("skipping t%02d — album will be incomplete", tr.Number))
-				continue
-			case "retry":
-				_ = os.Remove(dest)
-				i--
-				continue
-			default:
-				m.fail(job, "cancelled")
-				return
-			}
-		}
-
-		// The probe promised something; the transfer is the truth.
-		if delivered.Known() && tr.Quality.Known() && delivered.TierScore() < tr.Quality.TierScore() {
-			job.log("warn", fmt.Sprintf("t%02d delivered %s, probe said %s",
-				tr.Number, delivered.ShortLabel(), tr.Quality.ShortLabel()))
-		}
-
-		if m.runHook(ctx, job, HookTrackDownloaded,
-			m.payloadFor(job, pick.cand, staging, coverPathFor(staging), &tr, nil), skips) {
-			m.fail(job, "a required plugin failed")
+			m.fail(job, fmt.Sprintf("t%02d %q: %v", tr.Number, tr.Title, err))
 			return
 		}
 
-		art := m.artifact(job, tr, pick.cand, mb, dest, ext, cover)
-		for _, out := range chain.Run(ctx, &art) {
-			switch {
-			case out.Err == nil:
-			case out.Failed():
-				job.log("warn", fmt.Sprintf("%s t%02d: %v", out.Name, tr.Number, out.Err))
-			default:
-				// A skip is album-wide, not track-wide: say it once.
-				if reason, ok := out.Skipped(); ok && !skips[out.Name] {
-					skips[out.Name] = true
-					job.log("info", fmt.Sprintf("%s · %s (applies to every file here)", out.Name, reason))
-				}
-			}
-		}
-		job.log("info", fmt.Sprintf("t%02d tagged · %s", tr.Number, tagSummary(art)))
+		art := m.artifact(job, tr, pick.cand, mb, name, ext, cover)
+		album.Tracks = append(album.Tracks, &fspb.WriteTrack{
+			DestRel:     name,
+			Url:         ticket.URL,
+			Headers:     ticket.Headers,
+			Track:       int32(tr.Number),
+			Disc:        int32(tr.Disc),
+			Tags:        tagMessages(&art),
+			ExpectedExt: ext,
+			Transform:   transformMessage(ticket.Transform),
+		})
+	}
 
-		if m.runHook(ctx, job, HookTrackTagged,
-			m.payloadFor(job, pick.cand, staging, coverPathFor(staging), &tr, nil), skips) {
-			m.fail(job, "a required plugin failed")
-			return
-		}
+	job.mu.Lock()
+	job.Phase = PhaseDownloading
+	job.Progress = &Progress{Total: total}
+	job.mu.Unlock()
+	m.broadcast(job)
 
-		if st, err := os.Stat(dest); err == nil {
-			totalLen += st.Size()
+	var finalDir string
+	err = m.filer.MakeAlbum(ctx, job.userID, job.agentID, album, func(ev *fspb.WriteEvent) {
+		if msg := ev.GetMessage(); msg != "" {
+			job.log(ev.GetLevel(), msg)
 		}
-		written = append(written, name)
-		job.setProgress(i+1, fmt.Sprintf("t%02d %s", tr.Number, tr.Title))
+		if p := phaseFor(ev.GetPhase()); p != "" {
+			job.mu.Lock()
+			job.Phase = p
+			job.mu.Unlock()
+		}
+		if ev.GetTotal() > 0 {
+			job.setProgress(int(ev.GetDone()), "")
+		}
+		if ev.GetDir() != "" {
+			finalDir = ev.GetDir()
+		}
 		m.broadcast(job)
+	})
+	if err != nil {
+		m.fail(job, err.Error())
+		return
 	}
 
 	if line := mb.summary(); line != "" {
 		job.log("info", line)
 	}
 
-	m.publish(ctx, job, staging, written, len(tracks), totalLen, pick.cand, skips)
+	job.mu.Lock()
+	job.Phase = PhaseDone
+	job.Dir = finalDir
+	job.Result = fmt.Sprintf("%d/%d tracks · %s", total, total, pick.cand.Floor.ShortLabel())
+	job.mu.Unlock()
+	job.log("ok", fmt.Sprintf("Done. %d/%d files · %s → %s", total, total, pick.cand.Floor.ShortLabel(), finalDir))
+	m.broadcast(job)
+	m.persist(job)
+}
+
+// tagMessages renders an artifact's tag set for the wire.
+func tagMessages(a *postprocess.Artifact) []*fspb.Tag {
+	set := a.TagSet()
+	out := make([]*fspb.Tag, 0, len(set))
+	for _, t := range set {
+		out = append(out, &fspb.Tag{Key: t.Key, Values: t.Values})
+	}
+	return out
+}
+
+// transformMessage renders the decryption recipe, if the bytes need one.
+func transformMessage(tf *downloader.StreamTransform) *fspb.Transform {
+	if tf == nil {
+		return nil
+	}
+	return &fspb.Transform{Kind: tf.Kind, Chunk: int32(tf.Chunk), Every: int32(tf.Every), Key: tf.Key, Iv: tf.IV}
+}
+
+// phaseFor maps the agent's wording onto the job's, so the UI shows the same
+// phases whether the work happened here or on someone else's machine.
+func phaseFor(phase string) string {
+	switch phase {
+	case "downloading":
+		return PhaseDownloading
+	case "tagging", "publishing":
+		return PhaseWorking
+	default:
+		return ""
+	}
 }
 
 func extFor(q downloader.AudioQuality) string {

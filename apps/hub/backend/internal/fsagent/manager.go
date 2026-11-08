@@ -123,6 +123,10 @@ func (c *Conn) sendProto(msg *fspb.Envelope) error {
 
 // Manager tracks connected fs agent connections per user.
 type Manager struct {
+	// writeEvents routes a job's progress from the agent to whoever is waiting.
+	writeMu     sync.Mutex
+	writeEvents map[string]chan *fspb.WriteEvent
+
 	mu sync.RWMutex
 	// userID -> agentID -> *Conn
 	conns        map[string]map[string]*Conn
@@ -355,12 +359,88 @@ func (m *Manager) handleMessage(conn *Conn, env *fspb.Envelope) {
 	}
 
 	switch p := env.Payload.(type) {
+	case *fspb.Envelope_WriteEvent:
+		m.routeWriteEvent(p.WriteEvent)
 	case *fspb.Envelope_ScanResult:
 		m.processScanResult(conn, p.ScanResult)
 	default:
 		m.logger.Debug("received unhandled message from fs agent",
 			zap.String("agent_id", conn.AgentID),
 		)
+	}
+}
+
+// MakeAlbum tells one agent to perform a write job. Events are delivered through
+// onEvent until the job ends; the call returns when it does, or when the context
+// is cancelled.
+func (m *Manager) MakeAlbum(ctx context.Context, userID, agentID string, album *fspb.WriteAlbum, onEvent func(*fspb.WriteEvent)) error {
+	m.mu.RLock()
+	agents, ok := m.conns[userID]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("this account has no connected agent")
+	}
+	conn, ok := agents[agentID]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("that agent is not connected")
+	}
+
+	events := make(chan *fspb.WriteEvent, 64)
+	m.writeMu.Lock()
+	if m.writeEvents == nil {
+		m.writeEvents = make(map[string]chan *fspb.WriteEvent)
+	}
+	m.writeEvents[album.GetJobId()] = events
+	m.writeMu.Unlock()
+	defer func() {
+		m.writeMu.Lock()
+		delete(m.writeEvents, album.GetJobId())
+		m.writeMu.Unlock()
+	}()
+
+	if err := conn.sendProto(&fspb.Envelope{
+		Payload: &fspb.Envelope_WriteAlbum{WriteAlbum: album},
+	}); err != nil {
+		return fmt.Errorf("could not reach the agent: %w", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev := <-events:
+			if onEvent != nil {
+				onEvent(ev)
+			}
+			switch ev.GetPhase() {
+			case "done":
+				return nil
+			case "failed":
+				return fmt.Errorf("%s", ev.GetError())
+			}
+		}
+	}
+}
+
+// routeWriteEvent hands a progress line to the job waiting for it. A job nobody
+// is waiting for (a job the hub restarted away from) is dropped, not buffered
+// forever.
+func (m *Manager) routeWriteEvent(ev *fspb.WriteEvent) {
+	if ev == nil {
+		return
+	}
+	m.writeMu.Lock()
+	ch, ok := m.writeEvents[ev.GetJobId()]
+	m.writeMu.Unlock()
+	if !ok {
+		return
+	}
+	select {
+	case ch <- ev:
+	default:
+		// A full buffer means the consumer stopped reading; dropping a line beats
+		// blocking the agent's connection.
 	}
 }
 

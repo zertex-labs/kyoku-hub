@@ -9,6 +9,7 @@ package writer
 
 import (
 	"context"
+	"crypto/cipher"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 	"time"
 
 	"github.com/zertex-labs/kyoku-hub/packages/tagwriter"
+	"golang.org/x/crypto/blowfish"
+
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
@@ -32,13 +35,16 @@ type Emit func(*fspb.WriteEvent)
 // disk and the provider CDNs are not the bottleneck. Running albums in parallel
 // would only make the progress meaningless.
 type Executor struct {
+	// Root is the agent's library root: manifest paths resolve against it.
+	Root string
+
 	// Client is the HTTP client used for provider downloads. Short-lived signed
 	// URLs mean no connection reuse across tracks is worth forcing.
 	Client *http.Client
 }
 
-func New() *Executor {
-	return &Executor{Client: &http.Client{Timeout: 15 * time.Minute}}
+func New(root string) *Executor {
+	return &Executor{Root: root, Client: &http.Client{Timeout: 15 * time.Minute}}
 }
 
 // Run executes a manifest. It reports progress through emit and returns the
@@ -57,11 +63,12 @@ func (e *Executor) Run(ctx context.Context, album *fspb.WriteAlbum, emit Emit) e
 		emit(&fspb.WriteEvent{JobId: album.GetJobId(), Message: msg, Level: level, Total: total})
 	}
 
-	// A retag works in place; a download needs somewhere to land first, so a
-	// failure halfway through never leaves half an album in the library.
-	workDir := album.GetLibraryDir()
-	if album.GetStagingDir() != "" && album.GetKind() == "download" {
-		workDir = album.GetStagingDir()
+	// Paths in a manifest are relative to this machine's library root, because
+	// the hub has no idea what that root is called here.
+	libraryDir := filepath.Join(e.Root, filepath.FromSlash(album.GetLibraryRel()))
+	workDir := libraryDir
+	if album.GetStagingRel() != "" && album.GetKind() == "download" {
+		workDir = filepath.Join(e.Root, filepath.FromSlash(album.GetStagingRel()))
 	}
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return e.fail(album, emit, fmt.Errorf("cannot create %s: %w", workDir, err))
@@ -113,9 +120,9 @@ func (e *Executor) Run(ctx context.Context, album *fspb.WriteAlbum, emit Emit) e
 	}
 
 	// Publish: move the finished album into the library in one step.
-	if workDir != album.GetLibraryDir() {
+	if workDir != libraryDir {
 		phase("publishing")
-		if err := publish(workDir, album.GetLibraryDir()); err != nil {
+		if err := publish(workDir, libraryDir); err != nil {
 			return e.fail(album, emit, err)
 		}
 	}
@@ -126,7 +133,7 @@ func (e *Executor) Run(ctx context.Context, album *fspb.WriteAlbum, emit Emit) e
 		Done:   total,
 		Total:  total,
 		Result: fmt.Sprintf("%d %s", total, plural(total)),
-		Dir:    album.GetLibraryDir(),
+		Dir:    libraryDir,
 	})
 	return nil
 }
@@ -175,6 +182,13 @@ func (e *Executor) fetch(ctx context.Context, tr *fspb.WriteTrack, dest string) 
 		_ = os.Remove(tmp)
 		return fmt.Errorf("fetched %d bytes, expected %d", n, want)
 	}
+	if tf := tr.GetTransform(); tf != nil {
+		if err := applyTransform(tmp, tf); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	}
+
 	// A file that does not start like audio is a signed URL that expired and
 	// answered with a page, which otherwise gets tagged happily.
 	if err := looksLikeAudio(tmp, tr.GetExpectedExt()); err != nil {
@@ -182,6 +196,49 @@ func (e *Executor) fetch(ctx context.Context, tr *fspb.WriteTrack, dest string) 
 		return err
 	}
 	return os.Rename(tmp, dest)
+}
+
+// applyTransform unscrambles the file in place, chunk by chunk, so a 400 MB
+// album never needs a second copy on disk.
+func applyTransform(path string, tf *fspb.Transform) error {
+	if tf.GetKind() != "stripe-cbc" {
+		return fmt.Errorf("unknown stream transform %q", tf.GetKind())
+	}
+	chunk := int(tf.GetChunk())
+	every := int(tf.GetEvery())
+	if chunk <= 0 || every <= 0 {
+		return fmt.Errorf("stream transform has no geometry")
+	}
+
+	block, err := blowfish.NewCipher(tf.GetKey())
+	if err != nil {
+		return fmt.Errorf("stream transform key: %w", err)
+	}
+
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	buf := make([]byte, chunk)
+	for i := 0; ; i++ {
+		n, readErr := io.ReadFull(f, buf)
+		if n == 0 {
+			break
+		}
+		if i%every == 0 && n == chunk {
+			dec := cipher.NewCBCDecrypter(block, tf.GetIv())
+			dec.CryptBlocks(buf[:n], buf[:n])
+			if _, err := f.WriteAt(buf[:n], int64(i*chunk)); err != nil {
+				return err
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return nil
 }
 
 // looksLikeAudio checks the container magic rather than trusting the extension.

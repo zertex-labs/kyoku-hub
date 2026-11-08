@@ -13,8 +13,8 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/config"
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/handler"
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/hubclient"
-	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 	mw "github.com/zertex-labs/kyoku-hub/apps/fs/internal/middleware"
+	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 )
 
 func main() {
@@ -78,7 +78,7 @@ func main() {
 
 	// Start hub WS client in background
 	ctx := context.Background()
-	hc := hubclient.NewClient(cfg.HubWSURL, identity.AgentID, privateKey, fsHandler, log)
+	hc := hubclient.NewClient(cfg.HubWSURL, identity.AgentID, privateKey, fsHandler, cfg.LibraryDir, log)
 	go hc.Run(ctx)
 
 	log.Info("starting fs agent", zap.String("port", cfg.Port), zap.String("agent_id", identity.AgentID))

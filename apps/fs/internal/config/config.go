@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/utils"
@@ -11,6 +12,11 @@ import (
 type Config struct {
 	Port     string
 	ScanDirs []string
+
+	// LibraryDir is where downloads land and where manifests' relative paths
+	// resolve. It defaults to the first scan dir: the folder the agent already
+	// reports is the folder it should write to.
+	LibraryDir string
 
 	// Hub connection
 	HubWSURL  string // ws://hub:8080/ws/agent
@@ -48,6 +54,14 @@ func Load() (*Config, error) {
 
 	if len(cfg.ScanDirs) == 0 {
 		return nil, fmt.Errorf("got empty SCAN_DIRS, required at least one valid")
+	}
+	if cfg.LibraryDir == "" {
+		cfg.LibraryDir = cfg.ScanDirs[0]
+	}
+	// Absolute, because it ends up in job results and log lines: a path that only
+	// makes sense from one working directory is not a path.
+	if abs, err := filepath.Abs(cfg.LibraryDir); err == nil {
+		cfg.LibraryDir = abs
 	}
 
 	return cfg, nil

@@ -157,6 +157,8 @@ func main() {
 	sources := handler.SourceResolver(q, log)
 	downloadManager := download.NewManager(cfg.DownloadDir, sources, sseManager, handler.NewJobStore(q), log)
 	downloadManager.SetSettings(settingsStore)
+	// The agent is what writes to a user's disk; the hub never touches it.
+	downloadManager.SetFiler(agentManager)
 	downloadManager.OnPublish = func(userID, agentID string) {
 		if agentID != "" {
 			agentManager.RequestSyncAgent(userID, agentID, false)

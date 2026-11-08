@@ -3,12 +3,15 @@ package writer
 import (
 	"bytes"
 	"context"
+	"crypto/cipher"
 	"encoding/binary"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/crypto/blowfish"
 
 	"github.com/zertex-labs/kyoku-hub/packages/tagwriter"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
@@ -41,8 +44,8 @@ func TestRunDownloadsTagsAndPublishes(t *testing.T) {
 	album := &fspb.WriteAlbum{
 		JobId:      "job-1",
 		Kind:       "download",
-		StagingDir: filepath.Join(root, ".staging", "job-1"),
-		LibraryDir: filepath.Join(root, "Ado", "残夢"),
+		StagingRel: ".staging/job-1",
+		LibraryRel: "Ado/残夢",
 		EmbedCover: false,
 		Tracks: []*fspb.WriteTrack{{
 			DestRel:       "01 - Nukegara.flac",
@@ -63,17 +66,18 @@ func TestRunDownloadsTagsAndPublishes(t *testing.T) {
 	}
 
 	var events []*fspb.WriteEvent
-	err := New().Run(context.Background(), album, func(e *fspb.WriteEvent) { events = append(events, e) })
+	err := New(root).Run(context.Background(), album, func(e *fspb.WriteEvent) { events = append(events, e) })
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
 	// The file is in the library, not in staging, and staging is gone.
-	dest := filepath.Join(album.LibraryDir, "01 - Nukegara.flac")
+	libDir := filepath.Join(root, "Ado", "残夢")
+	dest := filepath.Join(libDir, "01 - Nukegara.flac")
 	if _, err := os.Stat(dest); err != nil {
 		t.Fatalf("dest missing: %v", err)
 	}
-	if _, err := os.Stat(album.StagingDir); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".staging", "job-1")); !os.IsNotExist(err) {
 		t.Errorf("staging dir still exists")
 	}
 
@@ -91,7 +95,7 @@ func TestRunDownloadsTagsAndPublishes(t *testing.T) {
 
 	// The last event is the one the hub turns into the job's result.
 	last := events[len(events)-1]
-	if last.GetPhase() != "done" || last.GetDir() != album.LibraryDir {
+	if last.GetPhase() != "done" || last.GetDir() != libDir {
 		t.Fatalf("last event = %+v", last)
 	}
 	if last.GetDone() != 1 || last.GetTotal() != 1 {
@@ -111,8 +115,8 @@ func TestRunRejectsShortFiles(t *testing.T) {
 	album := &fspb.WriteAlbum{
 		JobId:      "job-2",
 		Kind:       "download",
-		StagingDir: filepath.Join(root, "staging"),
-		LibraryDir: filepath.Join(root, "lib"),
+		StagingRel: "staging",
+		LibraryRel: "lib",
 		Tracks: []*fspb.WriteTrack{{
 			DestRel:       "01.flac",
 			Url:           srv.URL,
@@ -122,11 +126,11 @@ func TestRunRejectsShortFiles(t *testing.T) {
 		}},
 	}
 
-	err := New().Run(context.Background(), album, func(*fspb.WriteEvent) {})
+	err := New(root).Run(context.Background(), album, func(*fspb.WriteEvent) {})
 	if err == nil {
 		t.Fatal("expected an error for a short file")
 	}
-	if _, statErr := os.Stat(filepath.Join(album.LibraryDir, "01.flac")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(root, "lib", "01.flac")); !os.IsNotExist(statErr) {
 		t.Error("a short file reached the library")
 	}
 }
@@ -142,8 +146,8 @@ func TestRunRejectsNonAudio(t *testing.T) {
 	album := &fspb.WriteAlbum{
 		JobId:      "job-3",
 		Kind:       "download",
-		StagingDir: filepath.Join(root, "staging"),
-		LibraryDir: filepath.Join(root, "lib"),
+		StagingRel: "staging",
+		LibraryRel: "lib",
 		Tracks: []*fspb.WriteTrack{{
 			DestRel:     "01.flac",
 			Url:         srv.URL,
@@ -151,7 +155,7 @@ func TestRunRejectsNonAudio(t *testing.T) {
 			ExpectedExt: ".flac",
 		}},
 	}
-	if err := New().Run(context.Background(), album, func(*fspb.WriteEvent) {}); err == nil {
+	if err := New(root).Run(context.Background(), album, func(*fspb.WriteEvent) {}); err == nil {
 		t.Fatal("expected an error for a non-audio download")
 	}
 }
@@ -171,14 +175,14 @@ func TestRetagWritesInPlace(t *testing.T) {
 	album := &fspb.WriteAlbum{
 		JobId:      "job-4",
 		Kind:       "retag",
-		LibraryDir: lib,
+		LibraryRel: "lib",
 		Tracks: []*fspb.WriteTrack{{
 			DestRel: "01.flac",
 			Track:   1,
 			Tags:    []*fspb.Tag{{Key: "TITLE", Values: []string{"New Title"}}},
 		}},
 	}
-	if err := New().Run(context.Background(), album, func(*fspb.WriteEvent) {}); err != nil {
+	if err := New(root).Run(context.Background(), album, func(*fspb.WriteEvent) {}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -188,6 +192,65 @@ func TestRetagWritesInPlace(t *testing.T) {
 	}
 	if vals.Title != "New Title" {
 		t.Errorf("title = %q", vals.Title)
+	}
+}
+
+// The provider hands out encrypted bytes; the ticket says how to unscramble them.
+// Round trip: scramble a real file the same way, and expect it back byte for byte.
+func TestRunDecryptsTheStream(t *testing.T) {
+	plain := fakeFLACBytes(2048 * 3)
+	key := []byte("0123456789abcdef")
+	iv := []byte{0, 1, 2, 3, 4, 5, 6, 7}
+
+	encrypted := make([]byte, len(plain))
+	copy(encrypted, plain)
+	block, err := blowfish.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i*2048 < len(encrypted); i++ {
+		if i%3 != 0 {
+			continue
+		}
+		off := i * 2048
+		if off+2048 > len(encrypted) {
+			break
+		}
+		cipher.NewCBCEncrypter(block, iv).CryptBlocks(encrypted[off:off+2048], encrypted[off:off+2048])
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(encrypted)
+	}))
+	defer srv.Close()
+
+	root := t.TempDir()
+	album := &fspb.WriteAlbum{
+		JobId:      "job-5",
+		Kind:       "download",
+		StagingRel: "staging",
+		LibraryRel: "lib",
+		Tracks: []*fspb.WriteTrack{{
+			DestRel:       "01.flac",
+			Url:           srv.URL,
+			Track:         1,
+			ExpectedExt:   ".flac",
+			ExpectedBytes: int64(len(plain)),
+			Transform: &fspb.Transform{
+				Kind: "stripe-cbc", Chunk: 2048, Every: 3, Key: key, Iv: iv,
+			},
+		}},
+	}
+	if err := New(root).Run(context.Background(), album, func(*fspb.WriteEvent) {}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "lib", "01.flac"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatalf("decrypted file differs from the original (%d vs %d bytes)", len(got), len(plain))
 	}
 }
 

@@ -53,9 +53,10 @@ message WriteAlbum {
   string album_title = 3;
   string album_artist = 4;
 
-  // Absolute paths on the agent's own filesystem.
-  string staging_dir = 5;
-  string library_dir = 6;
+  // Paths relative to the agent's LIBRARY_DIR. The hub does not know, and must
+  // not need to know, where that is on somebody else's disk.
+  string staging_rel = 5;
+  string library_rel = 6;
 
   // Front cover, already fetched by the hub and sized once for the whole album.
   bytes cover = 7;
@@ -92,6 +93,20 @@ message WriteTrack {
   // tagging a truncated file.
   string expected_ext = 7;
   int64 expected_bytes = 8;
+
+  // How the bytes on the wire are scrambled, if they are. Deliberately a recipe
+  // and not a service name: the agent unscrambles, it does not learn where the
+  // bytes came from.
+  Transform transform = 9;
+}
+
+message Transform {
+  // "stripe-cbc": every `every`-th chunk of `chunk` bytes is CBC-encrypted.
+  string kind = 1;
+  int32 chunk = 2;
+  int32 every = 3;
+  bytes key = 4;
+  bytes iv = 5;
 }
 
 // A tag and its values: multi-valued (genres, artists) and ordered, because a

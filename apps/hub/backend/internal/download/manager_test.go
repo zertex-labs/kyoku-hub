@@ -3,12 +3,16 @@ package download
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zertex-labs/kyoku-hub/packages/tagwriter"
+	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 
 	flacvorbis "github.com/go-flac/flacvorbis"
 	flac "github.com/go-flac/go-flac"
@@ -38,6 +42,21 @@ func (f *fakeSource) ProbeAlbum(ctx context.Context, albumID string, ref downloa
 		return downloader.AlbumCandidate{}, f.probeErr
 	}
 	return f.cand, nil
+}
+
+// TrackTicket is what the hub now asks for: where the bytes are, not the bytes.
+func (f *fakeSource) TrackTicket(ctx context.Context, albumID, trackID string) (downloader.TrackTicket, error) {
+	if err := ctx.Err(); err != nil {
+		return downloader.TrackTicket{}, err
+	}
+	if err := f.trackErrs[trackID]; err != nil {
+		return downloader.TrackTicket{}, err
+	}
+	return downloader.TrackTicket{
+		URL:     "https://cdn.invalid/" + trackID,
+		Headers: map[string]string{"User-Agent": "test"},
+		Quality: downloader.DeezerFLAC,
+	}, nil
 }
 
 func (f *fakeSource) DownloadTrack(ctx context.Context, albumID, trackID, dest string) (downloader.AudioQuality, error) {
@@ -97,6 +116,62 @@ func flacTrack(id string, n int, title string) downloader.TrackQuality {
 	}
 }
 
+// ---- fake agent ------------------------------------------------------------
+
+// fakeFiler stands in for an fs agent: it records the manifest the hub produced
+// and then does what an agent would do with it, so the assertions below are about
+// the hub's decisions — tags, paths, tickets — rather than about file handling,
+// which the agent has its own tests for.
+type fakeFiler struct {
+	album  *fspb.WriteAlbum
+	events []*fspb.WriteEvent
+	fail   error
+	root   string
+}
+
+func (f *fakeFiler) MakeAlbum(ctx context.Context, userID, agentID string, album *fspb.WriteAlbum, onEvent func(*fspb.WriteEvent)) error {
+	f.album = album
+	if f.fail != nil {
+		return f.fail
+	}
+
+	dir := filepath.Join(f.root, filepath.FromSlash(album.LibraryRel))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	for i, tr := range album.Tracks {
+		dest := filepath.Join(dir, tr.DestRel)
+		if err := writeFakeAudio(dest); err != nil {
+			return err
+		}
+		tags := make([]tagwriter.Tag, 0, len(tr.Tags))
+		for _, tag := range tr.Tags {
+			tags = append(tags, tagwriter.Tag{Key: tag.Key, Values: tag.Values})
+		}
+		if len(tags) > 0 {
+			if err := tagwriter.WriteTags(dest, tags); err != nil {
+				return err
+			}
+		}
+		ev := &fspb.WriteEvent{
+			JobId: album.JobId, Phase: "tagging",
+			Done: int32(i + 1), Total: int32(len(album.Tracks)),
+			Message: fmt.Sprintf("t%02d done · %s", tr.Track, tr.DestRel),
+		}
+		f.events = append(f.events, ev)
+		onEvent(ev)
+	}
+
+	done := &fspb.WriteEvent{
+		JobId: album.JobId, Phase: "done",
+		Done: int32(len(album.Tracks)), Total: int32(len(album.Tracks)),
+		Dir: dir, Result: "ok",
+	}
+	f.events = append(f.events, done)
+	onEvent(done)
+	return nil
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 func newTestManager(t *testing.T, src *fakeSource) (*Manager, string) {
@@ -108,6 +183,7 @@ func newTestManager(t *testing.T, src *fakeSource) (*Manager, string) {
 	// Unit tests must never touch musicbrainz.org: tags are asserted from the
 	// candidate the fake source returns.
 	m.mb = nil
+	m.SetFiler(&fakeFiler{root: root})
 	return m, root
 }
 
@@ -223,8 +299,8 @@ func TestFitDownloadsSilentlyAndPublishes(t *testing.T) {
 	if !logHas(done, "tags ·") {
 		t.Errorf("no tag report in %v", logTexts(done))
 	}
-	if !logHas(done, "t01 tagged · ISRC GBDUW0000059") {
-		t.Errorf("per-track tag report missing: %v", logTexts(done))
+	if !logHas(done, "t01 done") {
+		t.Errorf("per-track report missing: %v", logTexts(done))
 	}
 	if !logHas(done, "cover · none") {
 		t.Errorf("cover line missing: %v", logTexts(done))
@@ -301,7 +377,11 @@ func TestMissSkipsTheSource(t *testing.T) {
 	}
 }
 
-func TestTrackFailureAsksThenSkips(t *testing.T) {
+// A ticket the provider will not hand out ends the job with the reason. There is
+// no per-track decision any more: the hub cannot tell a dead track from a dead
+// account without the agent having tried, and a half-written album is worse than
+// a clear failure.
+func TestTrackTicketFailureEndsTheJob(t *testing.T) {
 	src := &fakeSource{
 		search: []downloader.SearchResult{{ID: "1", Title: "Discovery", Artist: "Daft Punk", Year: "2001", TrackCount: 2}},
 		cand: fakeCandidate(
@@ -313,21 +393,13 @@ func TestTrackFailureAsksThenSkips(t *testing.T) {
 	m, _ := newTestManager(t, src)
 
 	job := startJob(t, m, 2)
-	waiting := waitFor(t, m, job.ID, func(j JobView) bool { return j.Decision != nil })
+	failed := waitFor(t, m, job.ID, func(j JobView) bool { return j.Phase == PhaseFailed })
 
-	if waiting.Decision.Kind != "track_failed" {
-		t.Fatalf("decision kind = %s", waiting.Decision.Kind)
+	if !strings.Contains(failed.Result, "404 from cdn") {
+		t.Errorf("result = %q, want the provider's reason", failed.Result)
 	}
-	if len(waiting.Decision.Options) < 2 {
-		t.Fatalf("expected skip/retry/cancel, got %+v", waiting.Decision.Options)
-	}
-
-	if err := m.Decide("user-1", job.ID, "skip"); err != nil {
-		t.Fatalf("decide: %v", err)
-	}
-	done := waitFor(t, m, job.ID, func(j JobView) bool { return j.Phase == PhaseDone })
-	if !strings.Contains(done.Result, "1/2") {
-		t.Errorf("result = %q, want 1/2 tracks (one skipped)", done.Result)
+	if !strings.Contains(failed.Result, "One More Time") {
+		t.Errorf("result = %q, want the track named", failed.Result)
 	}
 }
 
@@ -370,106 +442,4 @@ func readVorbis(t *testing.T, path string) map[string]string {
 		}
 	}
 	return out
-}
-
-// ---- plugins ---------------------------------------------------------------
-
-// fakeDispatcher stands in for the plugin registry: the pipeline's contract is
-// "call the dispatcher, publish whatever files it added, block only when a
-// required plugin failed". The real registry (processes, timeouts, payload JSON)
-// is covered by its own package.
-type fakeDispatcher struct {
-	add      func(dir string)
-	err      bool
-	required bool
-	code     int
-	called   []Hook
-}
-
-func (f *fakeDispatcher) Dispatch(_ context.Context, hook Hook, p Payload) []Outcome {
-	f.called = append(f.called, hook)
-	// Only on the album hook: files written during a track hook are already in
-	// staging when publish snapshots it, so they would not register as "added".
-	if f.add != nil && hook == HookAlbumBeforePublish {
-		f.add(p.Album.Dir)
-	}
-	if !f.err {
-		return []Outcome{{Plugin: "fake", Hook: string(hook)}}
-	}
-	return []Outcome{{
-		Plugin: "fake", Hook: string(hook), Err: errors.New("boom"), Stderr: "storage unreachable",
-	}}
-}
-
-func (f *fakeDispatcher) Required(string) bool { return f.required }
-func (f *fakeDispatcher) Names() []string      { return []string{"fake"} }
-func (f *fakeDispatcher) Count() int           { return 1 }
-
-// A file a plugin writes during album.beforePublish must reach the library, not
-// die with the staging directory.
-func TestPluginAddedFilesArePublished(t *testing.T) {
-	src := &fakeSource{
-		search: []downloader.SearchResult{{ID: "302127", Title: "Discovery", Artist: "Daft Punk", Year: "2001", TrackCount: 1}},
-		cand:   fakeCandidate(flacTrack("t1", 1, "One More Time")),
-	}
-	m, root := newTestManager(t, src)
-	m.SetDispatcher(&fakeDispatcher{add: func(dir string) {
-		_ = os.WriteFile(filepath.Join(dir, "lyrics.lrc"), []byte("hi"), 0o644)
-	}})
-
-	job := startJob(t, m, 1)
-	done := waitFor(t, m, job.ID, func(j JobView) bool { return j.Phase == PhaseDone })
-
-	if _, err := os.Stat(filepath.Join(root, "Daft Punk", "Discovery (2001)", "lyrics.lrc")); err != nil {
-		t.Fatalf("plugin file was not published: %v", err)
-	}
-	if !logHas(done, "plugins added · lyrics.lrc") {
-		t.Errorf("added file not reported: %v", logTexts(done))
-	}
-}
-
-// required: true turns a plugin failure into a blocked publish, so a library is
-// never published without the step the user declared mandatory.
-func TestRequiredPluginFailureBlocksPublish(t *testing.T) {
-	src := &fakeSource{
-		search: []downloader.SearchResult{{ID: "302127", Title: "Discovery", Artist: "Daft Punk", Year: "2001", TrackCount: 1}},
-		cand:   fakeCandidate(flacTrack("t1", 1, "One More Time")),
-	}
-	m, root := newTestManager(t, src)
-	m.SetDispatcher(&fakeDispatcher{err: true, required: true})
-
-	job := startJob(t, m, 1)
-	done := waitFor(t, m, job.ID, func(j JobView) bool {
-		return j.Phase == PhaseFailed || j.Phase == PhaseDone
-	})
-
-	if done.Phase != PhaseFailed {
-		t.Fatalf("phase = %s, want failed", done.Phase)
-	}
-	if _, err := os.Stat(filepath.Join(root, "Daft Punk", "Discovery (2001)")); !os.IsNotExist(err) {
-		t.Error("album was published despite a required plugin failing")
-	}
-	if !logHas(done, "storage unreachable") {
-		t.Errorf("plugin stderr missing from log: %v", logTexts(done))
-	}
-}
-
-// A failing optional plugin is a warning, and the album still lands.
-func TestOptionalPluginFailureStillPublishes(t *testing.T) {
-	src := &fakeSource{
-		search: []downloader.SearchResult{{ID: "302127", Title: "Discovery", Artist: "Daft Punk", Year: "2001", TrackCount: 1}},
-		cand:   fakeCandidate(flacTrack("t1", 1, "One More Time")),
-	}
-	m, root := newTestManager(t, src)
-	m.SetDispatcher(&fakeDispatcher{err: true})
-
-	job := startJob(t, m, 1)
-	done := waitFor(t, m, job.ID, func(j JobView) bool { return j.Phase == PhaseDone })
-
-	if _, err := os.Stat(filepath.Join(root, "Daft Punk", "Discovery (2001)", "01 - One More Time.flac")); err != nil {
-		t.Fatalf("album not published: %v", err)
-	}
-	if !logHas(done, "fake · track.tagged failed") {
-		t.Errorf("failure not reported: %v", logTexts(done))
-	}
 }

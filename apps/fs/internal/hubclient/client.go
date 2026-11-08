@@ -43,18 +43,22 @@ type Client struct {
 
 	scanMu sync.Mutex // serializes scans triggered by sync requests
 
+	// libraryDir is where manifests' relative paths resolve.
+	libraryDir string
+
 	// writeMu serializes write jobs: they are large sequential writes to the
 	// user's disk, and two albums at once only makes the progress meaningless.
 	writeMu  sync.Mutex
 	executor *writer.Executor
 }
 
-func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, fsHandler *handler.FsHandler, logger *zap.Logger) *Client {
+func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, fsHandler *handler.FsHandler, libraryDir string, logger *zap.Logger) *Client {
 	return &Client{
 		url:        hubWSURL,
 		agentID:    agentID,
 		privateKey: privateKey,
 		fsHandler:  fsHandler,
+		libraryDir: libraryDir,
 		logger:     logger,
 	}
 }
@@ -270,7 +274,7 @@ func (c *Client) handleWriteAlbum(album *fspb.WriteAlbum) {
 	defer c.writeMu.Unlock()
 
 	if c.executor == nil {
-		c.executor = writer.New()
+		c.executor = writer.New(c.libraryDir)
 	}
 	if album == nil {
 		return

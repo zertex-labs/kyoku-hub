@@ -50,3 +50,36 @@ type Prober interface {
 type ArtistSource interface {
 	ArtistAlbums(ctx context.Context, artist, title string) ([]SearchResult, error)
 }
+
+// StreamTransform describes how the bytes on the wire are scrambled, so whoever
+// fetches them can unscramble them without knowing which service produced them.
+//
+// Providers hand out signed URLs that point at encrypted media and expect the
+// client to decrypt as it reads. That decryption used to be the hub's job because
+// the hub did the fetching; now the bytes land on the user's machine, so the
+// recipe travels with the ticket instead of the code.
+type StreamTransform struct {
+	// Kind is the only part that is not just parameters: "stripe-cbc" means
+	// "block i is CBC-decrypted when i % Every == 0, in Chunk-sized pieces".
+	Kind  string
+	Chunk int
+	Every int
+	Key   []byte
+	IV    []byte
+}
+
+// TrackTicket is everything needed to fetch one track, without fetching it.
+type TrackTicket struct {
+	URL       string
+	Headers   map[string]string
+	Transform *StreamTransform
+	// Quality is what the provider says this URL will deliver, which is not
+	// necessarily what was asked for.
+	Quality AudioQuality
+}
+
+// Ticketer is the half of a source that a remote agent needs: resolve, don't
+// download.
+type Ticketer interface {
+	TrackTicket(ctx context.Context, albumID, trackID string) (TrackTicket, error)
+}
