@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download/postprocess"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
+	postprocess "github.com/zertex-labs/kyoku-hub/packages/tagwriter"
 )
 
 // mbWait is how long one track waits for its MusicBrainz id before giving up.

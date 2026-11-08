@@ -11,6 +11,7 @@ use (
 	./packages/musicbrainz-client
 	./packages/plugin-api
 	./packages/plugin-sdk
+	./packages/tagwriter
 	./packages/validation
 	./proto/gen
 )

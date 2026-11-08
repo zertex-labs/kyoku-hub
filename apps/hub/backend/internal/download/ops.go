@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download/postprocess"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
+	postprocess "github.com/zertex-labs/kyoku-hub/packages/tagwriter"
 )
 
 // KindInspect answers "what would this provider give me now", without downloading

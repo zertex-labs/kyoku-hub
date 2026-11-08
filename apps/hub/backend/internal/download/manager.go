@@ -17,10 +17,10 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download/postprocess"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
+	postprocess "github.com/zertex-labs/kyoku-hub/packages/tagwriter"
 )
 
 // SourceResolver is how the manager gets the caller's configured sources. It is

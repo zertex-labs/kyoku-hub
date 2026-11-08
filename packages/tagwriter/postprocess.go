@@ -5,7 +5,7 @@
 // Each step is a Processor with one job, so a new one is a new file with no
 // edits anywhere else — and a processor that fails or does not apply to a given
 // file cannot stop the download or the ones after it.
-package postprocess
+package tagwriter
 
 import (
 	"context"

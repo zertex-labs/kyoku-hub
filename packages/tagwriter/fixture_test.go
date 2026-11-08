@@ -1,4 +1,4 @@
-package postprocess
+package tagwriter
 
 import (
 	"os"

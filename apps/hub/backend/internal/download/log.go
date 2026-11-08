@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download/postprocess"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
+	postprocess "github.com/zertex-labs/kyoku-hub/packages/tagwriter"
 )
 
 // metadataLines reports what the post-processors are about to write, once per
