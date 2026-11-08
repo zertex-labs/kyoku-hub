@@ -179,93 +179,74 @@ merged with the manifest defaults and type-checked.
 
 ## Where a plugin lives
 
-Three kinds of state, three homes — because the plugin runs on the user's machine
-while the settings form lives in a hub that may be ours and may serve hundreds of
-people.
+Everything about a plugin lives on the machine that runs it: the binary, its
+manifest, whether it is enabled, and its settings.
 
-| state | home | why |
-| --- | --- | --- |
-| binary and `plugin.yaml` | the agent's disk | code compiled for one machine and one OS; shipping binaries to a shared hub is absurd |
-| what is installed (id, version, hooks, permissions, config schema) | reported by the agent, cached by the hub | the Plugins page must list them without poking every agent on every load |
-| enabled / disabled | hub, per `(user, agent, plugin)` | it is consent, given in the UI, and it must survive the agent being rebuilt |
-| config values | hub, per `(user, agent, plugin)`, secret fields encrypted | the form and the schema validation are in the hub |
-| the plugin's own data (caches, databases) | the agent, under its plugin directory | nobody else can use it |
-| what happened on a run | the job log | "why did replaygain fail" is a support question, and the answer belongs next to the job |
+That is a reversal of the first draft, which kept settings at the hub so the form
+could validate them. The scale argument was the excuse, but the real ones are
+better:
 
-The invariant is what keeps this sane: **the agent never writes user settings, and
-the hub never writes inventory.** Otherwise a rescan would reset somebody's
-toggles, and a reinstall would lose their API key.
+- **A shared hub has no business holding a user's plugin secrets.** An API key for
+  a metadata service is the user's; with settings on the agent it never leaves
+  their host, and the hub needs no encryption key for plugin data at all.
+- **Config describes a machine, not a person.** `/usr/bin/rsgain`, a cache
+  directory, a GPU toggle: these are per host. Keeping them next to the host is
+  the only place they are not a lie.
+- **One owner, no sync.** With settings at both ends there are two writers and a
+  merge question ("the agent changed, the hub changed, who wins"). With settings
+  on the agent there is nothing to merge.
 
-### Two tables
+So the hub stores **nothing** about plugins. It asks, displays, and forwards.
 
-```sql
--- inventory: written only by the agent, one row per plugin per agent
-CREATE TABLE agent_plugins (
-  user_id     TEXT NOT NULL,
-  agent_id    TEXT NOT NULL,
-  plugin_id   TEXT NOT NULL,
-  api_version INT  NOT NULL,
-  version     TEXT NOT NULL,
-  hooks       TEXT[] NOT NULL,
-  permissions JSONB NOT NULL,
-  config_schema JSONB NOT NULL,   -- straight from `--describe`
-  description TEXT,
-  author      TEXT,
-  reported_at TIMESTAMPTZ NOT NULL,
-  PRIMARY KEY (user_id, agent_id, plugin_id)
-);
+| data | where |
+| --- | --- |
+| binary, `plugin.yaml` | `PLUGINS_DIR` on the agent |
+| enabled flag, config values (incl. secrets) | `PLUGINS_DIR/<id>/config.json`, mode 0600 |
+| plugin's own data (caches, databases) | `PLUGINS_DIR/<id>/data/` |
+| what happened on a run | job log at the hub, produced by events from the agent |
 
--- intent: written only by the hub UI
-CREATE TABLE agent_plugin_settings (
-  user_id   TEXT NOT NULL,
-  agent_id  TEXT NOT NULL,
-  plugin_id TEXT NOT NULL,
-  enabled   BOOLEAN NOT NULL DEFAULT FALSE,
-  config    JSONB NOT NULL DEFAULT '{}'::jsonb,  -- secret fields encrypted
-  updated_at TIMESTAMPTZ NOT NULL,
-  PRIMARY KEY (user_id, agent_id, plugin_id)
-);
+### How the hub shows it
+
+The Plugins page is a proxy, not a store:
+
+```
+GET  /api/agents/{agentId}/plugins          → what that agent has
+PUT  /api/agents/{agentId}/plugins/{id}     → enable/disable + config
 ```
 
-A plugin that disappears from the agent's inventory is marked *missing*, not
-deleted: reinstalling it restores the same settings, and a half-broken setup is
-visible instead of silently vanishing.
+The agent answers `plugin.list` with id, version, hooks, permissions, the config
+schema from `--describe`, the enabled flag and the config with **secret values
+masked** (`"apiKey": "••••"`). The form is generated from the schema as before;
+saving sends only the fields the user touched, so a masked secret is never
+overwritten with the mask.
 
-### The flow
+An offline agent means an empty page with a reason, not a stale list pretending to
+be current.
 
-1. The agent connects (or rescans) and sends `PluginInventory`: everything from
-   its `--describe`, which the hub already uses to generate the config form.
-2. The hub upserts inventory rows and marks what is gone.
-3. The user toggles or configures on Settings → Plugins → `PUT
-   /api/plugins/{agent}/{plugin}`.
-4. The hub pushes the active config to the agent, which caches it, and includes
-   it in every `WriteAlbum` so a job never runs with stale settings.
-5. The agent runs the hooks inside the write job; each result comes back as a
-   line in the job log. A `required: true` plugin that fails fails the job.
+### What the protocol needs
 
-### Secrets
+Today the hub→agent channel is fire-and-forget: `SyncRequest`, `WriteAlbum`, and
+nothing comes back tied to a request. Listing plugins and saving a config need an
+answer, so the envelope gains a correlation id:
 
-Encrypted at rest with the plugin secretbox that already exists (keyed per user,
-agent and plugin), and never returned to the browser: the form shows `••••` and
-writes only when the value changes. This matches how provider credentials are
-already stored, and it is the one place where a self-hosted hub and our hub
-behave differently — ours holds the key, theirs holds theirs.
+```proto
+message Envelope {
+  string request_id = 100;   // empty for one-way messages
+  oneof payload { … }
+}
+```
 
-### Per-machine settings
-
-A field that names a binary (`/usr/bin/rsgain`) is machine-specific; an API key is
-not. Storing config per agent handles both, at the cost of typing a key twice for
-two agents. That is the right trade for now — a "copy settings from another
-agent" button can come later, but config inheritance cannot be retrofitted
-without confusion.
+The agent echoes `request_id` on the reply, the hub waits with a deadline, and a
+disconnected agent fails the call instead of hanging.
 
 ### What moves in the code
 
-`internal/plugins` (registry, dispatch, sandbox, secretbox, exec) becomes
-`packages/plugin-host`, used by the agent. The hub keeps the API, the UI, the two
-tables and the encryption key. The plugin directory becomes agent config:
+`internal/plugins` (registry, dispatch, sandbox, exec) becomes
+`packages/plugin-host`, owned by the agent. The hub keeps the two proxy
+endpoints, the page, and the schema-driven form — no table, no encryption.
+
+Plugin directory and identity become agent config:
 
 ```bash
 PLUGINS_DIR=~/.config/kyoku/plugins
 ```
-
