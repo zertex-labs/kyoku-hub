@@ -297,6 +297,31 @@ async function loadTagger() {
 const albumPathDraft = ref("");
 const albumPathError = ref("");
 
+// The example is the template rendered with a real album, so a typo in the
+// placeholders shows up while it is being typed rather than on a download.
+const PATH_EXAMPLE = { artist: "aespa", album: "Armageddon", year: "2024" };
+
+function renderAlbumPath(template: string, year: string): string {
+  let out = template.trim() || "{artist}/[{year}] {album}";
+  if (!year) {
+    // Same rule as the server: no year, no empty brackets.
+    out = out.replaceAll("[{year}]", "").replaceAll("({year})", "");
+  }
+  out = out
+    .replaceAll("{albumartist}", PATH_EXAMPLE.artist)
+    .replaceAll("{artist}", PATH_EXAMPLE.artist)
+    .replaceAll("{album}", PATH_EXAMPLE.album)
+    .replaceAll("{year}", year);
+  return out
+    .split("/")
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("/");
+}
+
+const albumPathPreview = computed(() => renderAlbumPath(albumPathDraft.value, PATH_EXAMPLE.year));
+const albumPathPreviewUndated = computed(() => renderAlbumPath(albumPathDraft.value, ""));
+
 async function saveAlbumPath() {
   const value = albumPathDraft.value.trim();
   if (!value || value === tagger.value.albumPath) return;
@@ -804,9 +829,16 @@ if (import.meta.client) {
               @blur="saveAlbumPath"
               @keyup.enter="saveAlbumPath"
             />
-            <p class="text-xs text-gray-600 mt-2">
-              Example: <span class="text-gray-400">aespa/[2024] Armageddon</span>
-            </p>
+            <div class="mt-3 space-y-1">
+              <p class="text-xs text-gray-600">
+                Example:
+                <span class="font-mono text-gray-300">{{ albumPathPreview }}</span>
+              </p>
+              <p v-if="albumPathPreviewUndated !== albumPathPreview" class="text-xs text-gray-600">
+                Without a year:
+                <span class="font-mono text-gray-400">{{ albumPathPreviewUndated }}</span>
+              </p>
+            </div>
             <p v-if="albumPathError" class="text-xs text-red-400 mt-2">{{ albumPathError }}</p>
           </div>
         </section>
