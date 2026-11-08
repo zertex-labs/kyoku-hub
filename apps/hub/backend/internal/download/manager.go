@@ -374,7 +374,9 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 	// while the audio downloads. Best-effort: no network, no MB tags.
 	mb := m.resolveMB(ctx, job.RGID, job.Album.ReleaseID, pick.cand)
 	if err := mb.failures(); err != "" {
-		job.log("warn", "musicbrainz: "+err)
+		// The message already names the service; prefixing it again produced
+		// "musicbrainz: musicbrainz: status 503".
+		job.log("warn", err)
 	}
 
 	// One cover download for the whole album: embedded in every track and written

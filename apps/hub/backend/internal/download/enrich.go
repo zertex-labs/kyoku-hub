@@ -45,8 +45,12 @@ type mbInfo struct {
 	groupPrimary   string // Album, Single, EP…
 	groupSecondary []string
 	artistSort     string
-	pending        map[string]bool // isrcs not yet looked up
-	err            string
+
+	// trackRec maps "disc:track" to the recording on the chosen edition.
+	trackRec   map[string]string
+	trackTotal int
+	pending    map[string]bool // isrcs not yet looked up
+	err        string
 }
 
 type mbRelease struct {
@@ -60,6 +64,13 @@ type mbRelease struct {
 
 type mbMediaOpt struct {
 	TrackCount int `json:"track-count"`
+	Position   int `json:"position"`
+	Tracks     []struct {
+		Position  int `json:"position"`
+		Recording struct {
+			ID string `json:"id"`
+		} `json:"recording"`
+	} `json:"tracks"`
 }
 
 type mbGroupResp struct {
@@ -134,9 +145,10 @@ type mbISRCResp struct {
 // album takes ~15s, which is roughly how long the audio takes anyway.
 func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand downloader.AlbumCandidate) *mbInfo {
 	info := &mbInfo{
-		rgid:   rgid,
-		chosen: releaseID,
-		rec:    make(map[string]string, len(cand.Tracks)),
+		rgid:       rgid,
+		chosen:     releaseID,
+		rec:        make(map[string]string, len(cand.Tracks)),
+		trackTotal: len(cand.Tracks),
 	}
 	// No group id, no client, or an id that is not a UUID (a test fixture, a
 	// malformed request): nothing to look up, and nothing must wait for it.
@@ -174,20 +186,18 @@ func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand do
 		info.err = err.Error()
 	}
 
-	// One request, synchronously, because the album title, date and label go into
-	// the very first file. The per-track ISRC lookups below can lag; these cannot.
-	if releaseID != "" && looksLikeUUID(releaseID) {
-		var rel mbReleaseResp
-		if err := m.mb.get(ctx, "/release/"+releaseID+"?fmt=json&inc=labels+release-groups", &rel); err == nil {
-			info.relID = rel.ID
-			info.relTitle = rel.Title
-			info.relDate = rel.Date
-			info.relLabel = rel.LabelName()
-			info.relStatus = rel.Status
-			info.relCountry = rel.Country
-			info.relBarcode = rel.Barcode
-			info.relCatalog = rel.CatalogNumber()
-		}
+	// One request, synchronously, because the album title, date, label and the
+	// recording ids go into the very first file. The ISRC lookups below can lag;
+	// these cannot.
+	if info.release != "" {
+		m.loadRelease(ctx, info, info.release)
+	}
+
+	// The edition's tracklist already names every recording; asking per ISRC on
+	// top of that is N more requests for the same answer, and N chances to be
+	// rate-limited halfway through an album.
+	if len(info.trackRec) >= len(cand.Tracks) {
+		return info
 	}
 
 	info.pending = make(map[string]bool, len(cand.Tracks))
@@ -339,6 +349,20 @@ func (i *mbInfo) albumLabel() string {
 	return i.relLabel
 }
 
+// recordingAt is the recording id the edition itself declares for this position.
+// It needs no lookup, no ISRC and no waiting.
+func (i *mbInfo) recordingAt(disc, track int) string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if len(i.trackRec) == 0 {
+		return ""
+	}
+	if disc == 0 {
+		disc = 1
+	}
+	return i.trackRec[fmt.Sprintf("%d:%d", disc, track)]
+}
+
 func (i *mbInfo) releaseStatus() string  { i.mu.Lock(); defer i.mu.Unlock(); return i.relStatus }
 func (i *mbInfo) releaseCountry() string { i.mu.Lock(); defer i.mu.Unlock(); return i.relCountry }
 func (i *mbInfo) catalogNumber() string  { i.mu.Lock(); defer i.mu.Unlock(); return i.relCatalog }
@@ -350,6 +374,42 @@ func (i *mbInfo) genres() []string {
 }
 func (i *mbInfo) firstRelease() string   { i.mu.Lock(); defer i.mu.Unlock(); return i.groupFirst }
 func (i *mbInfo) artistSortName() string { i.mu.Lock(); defer i.mu.Unlock(); return i.artistSort }
+
+// loadRelease fetches one edition and indexes what only it knows: the label, the
+// country, the barcode, the catalogue number and which recording is at each
+// position.
+func (m *Manager) loadRelease(ctx context.Context, info *mbInfo, releaseID string) {
+	if m.mb == nil || !looksLikeUUID(releaseID) {
+		return
+	}
+	var rel mbReleaseResp
+	if err := m.mb.get(ctx, "/release/"+releaseID+"?fmt=json&inc=labels+release-groups+recordings", &rel); err != nil {
+		return
+	}
+
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	info.relID = rel.ID
+	info.relTitle = rel.Title
+	info.relDate = rel.Date
+	info.relLabel = rel.LabelName()
+	info.relStatus = rel.Status
+	info.relCountry = rel.Country
+	info.relBarcode = rel.Barcode
+	info.relCatalog = rel.CatalogNumber()
+	info.trackRec = make(map[string]string, len(rel.Media))
+	for _, md := range rel.Media {
+		disc := md.Position
+		if disc == 0 {
+			disc = 1
+		}
+		for _, tr := range md.Tracks {
+			if tr.Recording.ID != "" {
+				info.trackRec[fmt.Sprintf("%d:%d", disc, tr.Position)] = tr.Recording.ID
+			}
+		}
+	}
+}
 
 // releaseType is the group's primary type, with any secondary types appended the
 // way MusicBrainz presents them ("album + compilation").
@@ -382,7 +442,7 @@ func (i *mbInfo) summary() string {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	if i.artist == "" && len(i.rec) == 0 {
+	if i.artist == "" && len(i.rec) == 0 && len(i.trackRec) == 0 {
 		if i.err != "" {
 			return "mb · unavailable (" + i.err + ")"
 		}
@@ -396,8 +456,20 @@ func (i *mbInfo) summary() string {
 	if i.release != "" {
 		parts = append(parts, "release "+shortID(i.release))
 	}
-	total := len(i.rec) + len(i.pending)
-	parts = append(parts, fmt.Sprintf("recordings %d/%d", len(i.rec), total))
+	// Count against the album, not against what we happened to look up: "14/14"
+	// on a 16-track album reads as complete when two tracks have no id.
+	have := make(map[string]bool, len(i.rec)+len(i.trackRec))
+	for _, id := range i.trackRec {
+		have[id] = true
+	}
+	for _, id := range i.rec {
+		have[id] = true
+	}
+	total := i.trackTotal
+	if total < len(have) {
+		total = len(have)
+	}
+	parts = append(parts, fmt.Sprintf("recordings %d/%d", len(have), total))
 	return "mb · " + strings.Join(parts, " · ")
 }
 

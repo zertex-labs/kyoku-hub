@@ -29,6 +29,14 @@ func fakeMB(t *testing.T, hits *int32) *mbClient {
 			    {"id":"99cc17f3-3d4e-4cf7-9569-1a84ac1f9658","date":"2026-10-15","status":"Official",
 			     "media":[{"track-count":2}]}
 			  ]}`)
+		case strings.HasPrefix(r.URL.Path, "/release/99cc17f3-3d4e-4cf7-9569-1a84ac1f9658"):
+			fmt.Fprint(w, `{
+			  "id":"99cc17f3-3d4e-4cf7-9569-1a84ac1f9658","title":"Raven Sky","date":"2026-10-15","country":"XW","status":"Official",
+			  "label-info":[{"label":{"name":"Virgin Music"},"catalog-number":"TYCT-60123"}],
+			  "media":[{"position":1,"track-count":2,"tracks":[
+			    {"position":1,"recording":{"id":"662ec667-2102-41a2-a9e0-3b46da7af447"}},
+			    {"position":2,"recording":{"id":"a1b2c3d4-0000-4000-8000-000000000002"}}
+			  ]}]}`)
 		case strings.HasPrefix(r.URL.Path, "/release/782b43b0-e017-45bf-9eca-d1d7f87e9073"):
 			fmt.Fprint(w, `{
 			  "id":"782b43b0-e017-45bf-9eca-d1d7f87e9073","title":"放生会","date":"2024-05-28","country":"XW","status":"Official",
@@ -57,9 +65,12 @@ func TestResolveMBFillsArtistReleaseAndRecording(t *testing.T) {
 
 	info := m.resolveMB(context.Background(), testRGID, "", downloader.AlbumCandidate{Tracks: mbTracks()})
 
-	id := info.recording(context.Background(), "JPPO02603857", 3*time.Second)
-	if id != "662ec667-2102-41a2-a9e0-3b46da7af447" {
-		t.Fatalf("recording = %q", id)
+	// Position decides: the edition said which recording is at track 1.
+	if id := info.recordingAt(1, 1); id != "662ec667-2102-41a2-a9e0-3b46da7af447" {
+		t.Fatalf("recording at 1:1 = %q", id)
+	}
+	if id := info.recordingAt(1, 2); id != "a1b2c3d4-0000-4000-8000-000000000002" {
+		t.Fatalf("recording at 1:2 = %q", id)
 	}
 	if got := info.artistID(); got != "e134b52f-2e9e-4734-9bc3-bea9648d1fa1" {
 		t.Errorf("artist id = %q", got)
@@ -67,7 +78,8 @@ func TestResolveMBFillsArtistReleaseAndRecording(t *testing.T) {
 	if got := info.releaseID(); got != "99cc17f3-3d4e-4cf7-9569-1a84ac1f9658" {
 		t.Errorf("release id = %q", got)
 	}
-	// One group lookup plus one ISRC lookup, not one per track.
+	// Group plus release: the release carries the whole tracklist, so no per-ISRC
+	// lookup is needed at all.
 	if n := atomic.LoadInt32(&hits); n != 2 {
 		t.Errorf("requests = %d, want 2", n)
 	}
@@ -187,7 +199,9 @@ func TestNoChosenReleaseStillGuesses(t *testing.T) {
 	if got := info.releaseID(); got != "99cc17f3-3d4e-4cf7-9569-1a84ac1f9658" {
 		t.Fatalf("release id = %q", got)
 	}
-	if got := info.albumTitle(); got != "" {
-		t.Errorf("title = %q, want empty (nothing was chosen)", got)
+	// A guessed edition still owns its metadata: the title comes from the
+	// release it picked, not from whatever the provider called the album.
+	if got := info.albumTitle(); got != "Raven Sky" {
+		t.Errorf("title = %q", got)
 	}
 }

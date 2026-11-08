@@ -59,7 +59,10 @@ func (m *Manager) artifact(
 		Disc:       tr.Disc,
 		ISRC:       tr.ISRC,
 
-		MBTrackID:       mb.recording(context.Background(), tr.ISRC, mbWait),
+		// Position first: the edition already told us which recording sits at
+		// track N, and it cannot be rate-limited. The ISRC lookup is the fallback
+		// for a track the edition does not list.
+		MBTrackID:       firstNonEmptyString(mb.recordingAt(tr.Disc, tr.Number), mb.recording(context.Background(), tr.ISRC, mbWait)),
 		MBArtistID:      mb.artistID(),
 		MBAlbumArtistID: mb.albumArtistID(),
 		MBAlbumID:       mb.releaseID(),
