@@ -130,3 +130,15 @@ func (c *Chain) Run(ctx context.Context, a *Artifact) []Outcome {
 func Default() *Chain {
 	return New(Tags{}, Cover{})
 }
+
+// Configured builds the built-in chain for a user's tagger options. Tags always
+// run — the album's metadata is the point — while artwork is what people turn
+// off, either because the files carry their own or because the folder already has
+// a cover.jpg from another tool.
+func Configured(embedCover, writeCoverFile bool) *Chain {
+	processors := []Processor{Tags{}}
+	if embedCover || writeCoverFile {
+		processors = append(processors, Cover{NoEmbed: !embedCover, NoFile: !writeCoverFile})
+	}
+	return New(processors...)
+}

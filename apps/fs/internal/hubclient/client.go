@@ -277,6 +277,9 @@ func (c *Client) handleSyncRequest(req *fspb.SyncRequest) {
 				TrackNum:                   int32(f.MusicTags.TrackNum),
 				MusicbrainzReleaseGroupId:  f.MusicTags.MusicBrainzReleaseGroupID,
 				MusicbrainzArtistId:        f.MusicTags.MusicBrainzArtistID,
+				MusicbrainzReleaseId:       f.MusicTags.MusicBrainzReleaseID,
+				MusicbrainzTrackId:         f.MusicTags.MusicBrainzRecordingID,
+				Isrc:                       f.MusicTags.ISRC,
 			})
 		}
 	}

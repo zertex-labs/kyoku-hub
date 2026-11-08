@@ -14,13 +14,21 @@ import (
 //
 // A sidecar alone is not enough: most players read art from the file, so a
 // library that only has cover.jpg shows blank artwork in half of them.
-type Cover struct{}
+type Cover struct {
+	// NoEmbed and NoFile are opt-outs, so the zero value keeps the original
+	// behaviour: embed into every file and drop cover.jpg beside them.
+	NoEmbed bool
+	NoFile  bool
+}
 
 func (Cover) Name() string { return "cover" }
 
 func (c Cover) Process(ctx context.Context, a *Artifact) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if c.NoEmbed {
+		return Skip("artwork embedding is off in settings")
 	}
 	if len(a.Cover) == 0 {
 		return Skip("the provider had no artwork for this album")

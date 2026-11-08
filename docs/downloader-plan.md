@@ -666,3 +666,26 @@ manifest, stored encrypted and served to the plugin typed; the sandbox allows
 read-only system paths plus the album directory and one temp dir, and denies all
 TCP. No upload endpoint: a plugin is installed by copying a directory onto the
 server.
+
+## 11. Tagger options
+
+What gets written into a file is a user preference, stored per account in
+`user_settings` and edited under Settings → Tagger. Four options, because they
+are the ones with a real disagreement behind them:
+
+| option | default | what it changes |
+| --- | --- | --- |
+| Require MusicBrainz tags | off | whether a file without the ids counts as complete |
+| Embed cover art | on | front-cover PICTURE in every file |
+| Write cover.jpg | on | folder artwork beside the tracks |
+| Prefer the store's genre | off | whose genre string wins: the store's or MusicBrainz's |
+
+Nothing else about tagging is configurable, deliberately. Track/disc numbering,
+the Picard key names, the front-cover picture type and the date preference are
+what make files interoperate; a switch for those would only produce files that
+some other tool cannot read.
+
+The first option is enforced during the fs agent's scan, so the album grid
+answers "which albums are not fully identified" without touching a file. The
+other three are applied when a download or a re-tag runs, which is the only
+moment tags are written.

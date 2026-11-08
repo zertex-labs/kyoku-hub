@@ -37,6 +37,7 @@ type MusicTags struct {
 	DiscNum     int        `json:"disc_num"`
 	DiscTotal   int        `json:"disc_total"`
 	Comment     string     `json:"comment"`
+	ISRC        string     `json:"isrc"`
 
 	MusicBrainzTags
 }
@@ -143,7 +144,7 @@ func (h *FsHandler) ScanDirs(dirs []string, full bool) (FileDataMap, error) {
 
 			parentDir := filepath.Dir(path)
 			if dirFiles, ok := cachedDirs[parentDir]; ok && dirFiles != nil {
-				if cached, hit := dirFiles[path]; hit {
+				if cached, hit := dirFiles[path]; hit && cached.ModTime.Equal(info.ModTime()) {
 					record[dir] = append(record[dir], cached)
 					return nil
 				}
@@ -215,6 +216,7 @@ func (h *FsHandler) CompleteMetadata(dir string, base BaseFileData) (FileData, e
 			DiscNum:         discNum,
 			DiscTotal:       discTotal,
 			Comment:         m.Comment(),
+			ISRC:            getISRC(format, raw),
 			MusicBrainzTags: getMusicBrainzTags(format, raw),
 		},
 	}, nil
@@ -242,6 +244,15 @@ func getRawTag(raw map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// getISRC reads the recording code, which is what MusicBrainz matches on when a
+// file has no recording id yet.
+func getISRC(format tag.Format, raw map[string]interface{}) string {
+	if format == tag.VORBIS {
+		return getRawTag(raw, "ISRC")
+	}
+	return getRawTag(raw, "TSRC")
 }
 
 func getMusicBrainzTags(format tag.Format, raw map[string]interface{}) MusicBrainzTags {

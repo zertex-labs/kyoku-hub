@@ -20,6 +20,19 @@ const mbWait = 2500 * time.Millisecond
 // artifact is the download's view of one file, handed to the post-processors.
 // Everything they need was resolved during probe/enrich/download, so a processor
 // never has to ask a provider or MusicBrainz anything.
+// genres decides whose genre wins. MusicBrainz's is a listener's word for the
+// music; the provider's is a marketing bucket ("Asian Music"). That is why MB is
+// the default, and why the setting exists for people who disagree.
+func (m *Manager) genres(job *Job, mb *mbInfo, cand downloader.AlbumCandidate) []string {
+	if m.options(job).PreferProviderGenre {
+		if cand.Genre != "" {
+			return []string{cand.Genre}
+		}
+		return firstNonEmptyStrings(mb.genres(), "")
+	}
+	return firstNonEmptyStrings(mb.genres(), cand.Genre)
+}
+
 func (m *Manager) artifact(
 	job *Job,
 	tr downloader.TrackQuality,
@@ -42,7 +55,7 @@ func (m *Manager) artifact(
 		AlbumArtist:    artist,
 		Artist:         artist,
 		Year:           firstNonEmptyString(mb.albumDate(), dateFor(job, cand)),
-		Genres:         firstNonEmptyStrings(mb.genres(), cand.Genre),
+		Genres:         m.genres(job, mb, cand),
 		Label:          firstNonEmptyString(mb.albumLabel(), cand.Label),
 		ReleaseType:    firstNonEmptyString(mb.releaseType(), cand.Format),
 		ReleaseStatus:  mb.releaseStatus(),

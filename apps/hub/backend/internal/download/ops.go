@@ -293,7 +293,9 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 
 	mb := m.resolveMB(ctx, job.RGID, job.Album.ReleaseID, cand)
 	cover := readCoverIfAny(dir)
-	for _, line := range metadataLines(job, cand, mb, cover, m.post) {
+	opts := m.options(job)
+	chain := m.chain(opts)
+	for _, line := range metadataLines(job, cand, mb, cover, chain, opts) {
 		job.log("info", line)
 	}
 
@@ -320,7 +322,7 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 			Title: v.Title, Number: n, Disc: v.Disc, ISRC: v.ISRC, Known: true,
 		}
 		art := m.artifact(job, tq, cand, mb, f, filepath.Ext(f), cover)
-		for _, o := range m.post.Run(ctx, &art) {
+		for _, o := range chain.Run(ctx, &art) {
 			if reason, skipped := o.Skipped(); skipped {
 				job.log("warn", filepath.Base(f)+": "+o.Name+" skipped — "+reason)
 			} else if o.Err != nil {

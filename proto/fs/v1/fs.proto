@@ -54,6 +54,12 @@ message TrackEntry {
   int32 track_num = 6;
   string musicbrainz_release_group_id = 7;
   string musicbrainz_artist_id = 8;
+  // The identifiers that make a file findable by everything else: without them a
+  // library can only match on text. Sent so the hub can say "this album is
+  // present but not identified" instead of only "present".
+  string musicbrainz_release_id = 9;
+  string musicbrainz_track_id = 10;
+  string isrc = 11;
 }
 
 // Fs -> Hub: scan results

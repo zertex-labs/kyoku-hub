@@ -5,13 +5,29 @@ import (
 	"strings"
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download/postprocess"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
 )
 
 // metadataLines reports what the post-processors are about to write, once per
 // album. The per-track details follow as tracks download; this is the "what is
 // going into these files" header, so a user never has to open a tag editor.
-func metadataLines(job *Job, cand downloader.AlbumCandidate, mb *mbInfo, cover []byte, chain *postprocess.Chain) []string {
+// coverPlacement says where the artwork goes, so the log matches what settings
+// asked for instead of always promising both.
+func coverPlacement(o settings.Options) string {
+	switch {
+	case o.EmbedCover && o.WriteCoverFile:
+		return "embedded in every track + cover.jpg"
+	case o.EmbedCover:
+		return "embedded in every track"
+	case o.WriteCoverFile:
+		return "cover.jpg beside the tracks"
+	default:
+		return ""
+	}
+}
+
+func metadataLines(job *Job, cand downloader.AlbumCandidate, mb *mbInfo, cover []byte, chain *postprocess.Chain, opts settings.Options) []string {
 	// The same precedence the tagger uses, or the log would describe one edition
 	// and the files would carry another.
 	title := firstNonEmptyString(mb.albumTitle(), cand.Title)
@@ -48,7 +64,12 @@ func metadataLines(job *Job, cand downloader.AlbumCandidate, mb *mbInfo, cover [
 		if w > 0 && h > 0 {
 			size = fmt.Sprintf("%d×%d ", w, h)
 		}
-		lines = append(lines, fmt.Sprintf("cover · %s%s · embedded in every track + cover.jpg", size, mime))
+		where := coverPlacement(opts)
+		if where == "" {
+			lines = append(lines, fmt.Sprintf("cover · %s%s · written nowhere, artwork is off in settings", size, mime))
+		} else {
+			lines = append(lines, fmt.Sprintf("cover · %s%s · %s", size, mime, where))
+		}
 	} else {
 		lines = append(lines, "cover · none — the provider had no artwork for this album")
 	}

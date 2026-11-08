@@ -17,6 +17,7 @@ import (
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/database/queries"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/model"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	"github.com/zertex-labs/kyoku-hub/packages/validation"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
@@ -62,8 +63,13 @@ type Manager struct {
 	sseManager   *sse.Manager
 	state        *stateStore
 	requiredTags []string
+	opts         settings.Provider
 	logger       *zap.Logger
 }
+
+// SetSettings installs the user's tagger options; without them the deploy's
+// required-tag list stands on its own.
+func (m *Manager) SetSettings(p settings.Provider) { m.opts = p }
 
 func NewManager(q *queries.Queries, sseManager *sse.Manager, requiredTags []string, logger *zap.Logger) *Manager {
 	return &Manager{
@@ -297,14 +303,24 @@ func (m *Manager) processScanResult(conn *Conn, result *fspb.ScanResult) {
 	groups := make(map[string]*rgGroup)
 	var untagged []UntaggedTrack
 
+	required := m.requiredTags
+	if m.opts != nil && m.opts.Get(ctx, userID).RequireMusicBrainzTags {
+		required = append(append([]string{}, required...), validation.MusicBrainzTags...)
+	}
+
 	for _, t := range result.Tracks {
 		missing := validation.Missing(validation.Track{
-			Title:    t.Title,
-			Album:    t.Album,
-			Artist:   t.Artist,
-			Year:     int(t.Year),
-			TrackNum: int(t.TrackNum),
-		}, m.requiredTags)
+			Title:            t.Title,
+			Album:            t.Album,
+			Artist:           t.Artist,
+			Year:             int(t.Year),
+			TrackNum:         int(t.TrackNum),
+			MBTrackID:        t.MusicbrainzTrackId,
+			MBAlbumID:        t.MusicbrainzReleaseId,
+			MBArtistID:       t.MusicbrainzArtistId,
+			MBReleaseGroupID: t.MusicbrainzReleaseGroupId,
+			ISRC:             t.Isrc,
+		}, required)
 
 		if t.MusicbrainzReleaseGroupId == "" {
 			untagged = append(untagged, UntaggedTrack{

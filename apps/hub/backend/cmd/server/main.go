@@ -22,6 +22,7 @@ import (
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/handler"
 	mw "github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/middleware"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/plugins"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	logger "github.com/zertex-labs/kyoku-hub/packages/logger"
 	api "github.com/zertex-labs/kyoku-hub/packages/plugin-api"
@@ -132,7 +133,12 @@ func main() {
 	brainzAPI := brainzclient.NewAPI(cfg.BrainzAPIURL)
 
 	// Fs agent WS endpoint (challenge-response auth, no session needed)
+	// One place decides what a user's tagger does; the agent scan and the
+	// download both consult it.
+	settingsStore := settings.NewStore(q)
+
 	agentManager := fsagent.NewManager(q, sseManager, cfg.RequiredTags, log)
+	agentManager.SetSettings(settingsStore)
 	e.GET("/ws/agent", agentManager.HandleWS)
 
 	artistHandler := handler.NewArtistHandler(cfg, q, bc, brainzAPI, agentManager, log)
@@ -150,6 +156,7 @@ func main() {
 	// connected. Sources come from provider_credentials, so the walk is per user.
 	sources := handler.SourceResolver(q, log)
 	downloadManager := download.NewManager(cfg.DownloadDir, sources, sseManager, handler.NewJobStore(q), log)
+	downloadManager.SetSettings(settingsStore)
 	downloadManager.OnPublish = func(userID, agentID string) {
 		if agentID != "" {
 			agentManager.RequestSyncAgent(userID, agentID, false)
@@ -185,6 +192,9 @@ func main() {
 
 	pluginHandler := handler.NewPluginHandler(pluginRegistry, pluginStoreConcrete, downloadManager, q)
 	pluginHandler.Register(e.Group("/api/plugins"))
+
+	settingsHandler := handler.NewSettingsHandler(q, settingsStore, log)
+	settingsHandler.Register(e.Group("/api/settings"))
 
 	downloadHandler := handler.NewDownloadHandler(downloadManager, sources, q, log)
 	downloadHandler.Register(e.Group("/api/download"))

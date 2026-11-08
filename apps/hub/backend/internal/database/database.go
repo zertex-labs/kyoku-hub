@@ -91,6 +91,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 	CREATE INDEX IF NOT EXISTS idx_frgs_user_id ON fs_release_group_states(user_id);
 
+	CREATE TABLE IF NOT EXISTS user_settings (
+		user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+		data JSONB NOT NULL DEFAULT '{}'::jsonb,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
 	CREATE TABLE IF NOT EXISTS plugin_state (
 		plugin_id  TEXT PRIMARY KEY,
 		enabled    BOOLEAN NOT NULL DEFAULT FALSE,

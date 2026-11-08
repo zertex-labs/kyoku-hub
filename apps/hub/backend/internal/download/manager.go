@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/download/postprocess"
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/sse"
 	"github.com/zertex-labs/kyoku-hub/packages/downloader"
 )
@@ -48,6 +49,7 @@ type Manager struct {
 	mb       *mbClient          // MusicBrainz lookups, rate limited process-wide
 	post     *postprocess.Chain // post-download steps, in order
 	dispatch Dispatcher         // user-installed plugins; nil means none
+	opts     settings.Provider  // the user's tagger options; nil means the defaults
 
 	// OnPublish is called after a batch lands in the library, so the caller can
 	// ask the right fs agent to rescan. Optional; nil-safe.
@@ -76,6 +78,23 @@ func NewManager(
 		mb:      newMBClient(),
 		post:    postprocess.Default(),
 	}
+}
+
+// SetSettings installs the user's tagger options. Without it the manager behaves
+// as it did before the options existed: everything on.
+func (m *Manager) SetSettings(p settings.Provider) { m.opts = p }
+
+// options returns the tagger options for a job's owner.
+func (m *Manager) options(job *Job) settings.Options {
+	if m.opts == nil {
+		return settings.Default()
+	}
+	return m.opts.Get(context.Background(), job.userID)
+}
+
+// chain is the post-processing pipeline this job should run.
+func (m *Manager) chain(o settings.Options) *postprocess.Chain {
+	return postprocess.Configured(o.EmbedCover, o.WriteCoverFile)
 }
 
 // StartRequest is what the download page posts after the user picks a release.
@@ -379,17 +398,23 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 		job.log("warn", err)
 	}
 
+	// The album's tagger options: what to write into the files themselves.
+	opts := m.options(job)
+
 	// One cover download for the whole album: embedded in every track and written
 	// beside them. Best-effort — missing art must not fail a download.
 	cover, err := m.fetchCover(job.Album.Cover)
 	if err != nil {
 		job.log("warn", "cover art: "+err.Error())
 	}
-	if err := WriteCover(staging, cover); err != nil {
-		job.log("warn", "could not write cover.jpg: "+err.Error())
+	if opts.WriteCoverFile {
+		if err := WriteCover(staging, cover); err != nil {
+			job.log("warn", "could not write cover.jpg: "+err.Error())
+		}
 	}
 
-	for _, line := range metadataLines(job, pick.cand, mb, cover, m.post) {
+	chain := m.chain(opts)
+	for _, line := range metadataLines(job, pick.cand, mb, cover, chain, opts) {
 		job.log("info", line)
 	}
 	if names := m.pluginNames(); len(names) > 0 {
@@ -467,7 +492,7 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 		}
 
 		art := m.artifact(job, tr, pick.cand, mb, dest, ext, cover)
-		for _, out := range m.post.Run(ctx, &art) {
+		for _, out := range chain.Run(ctx, &art) {
 			switch {
 			case out.Err == nil:
 			case out.Failed():

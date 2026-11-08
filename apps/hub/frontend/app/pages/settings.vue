@@ -8,12 +8,13 @@ const apiBase = config.public.apiBaseUrl as string;
 
 const MAX_AGENTS = 3;
 
-type SectionId = "account" | "agents" | "connections" | "plugins"
+type SectionId = "account" | "agents" | "connections" | "tagger" | "plugins"
 
 const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "account", label: "Account", icon: "lucide:user" },
   { id: "agents", label: "File System Agents", icon: "lucide:hard-drive" },
   { id: "connections", label: "Connections", icon: "lucide:plug" },
+  { id: "tagger", label: "Tagger", icon: "lucide:tags" },
   { id: "plugins", label: "Plugins", icon: "lucide:puzzle" },
 ];
 
@@ -235,6 +236,7 @@ watch(
   active,
   (v) => {
     if (v === "connections") fetchConnections();
+    if (v === "tagger") loadTagger();
   },
   { immediate: true },
 );
@@ -255,6 +257,58 @@ const plugins = ref<PluginRow[]>([])
 const pluginsLoading = ref(false)
 const pluginError = ref<string | null>(null)
 const pluginBusy = ref<string | null>(null)
+
+// --- Tagger ---
+// These four decide what a download writes into the files. The backend merges a
+// partial body, so each row saves itself and the switch never lies about state.
+interface TaggerOptions {
+  requireMusicBrainzTags: boolean;
+  embedCover: boolean;
+  writeCoverFile: boolean;
+  preferProviderGenre: boolean;
+}
+
+const tagger = ref<TaggerOptions>({
+  requireMusicBrainzTags: false,
+  embedCover: true,
+  writeCoverFile: true,
+  preferProviderGenre: false,
+});
+const taggerBusy = ref(false);
+const taggerNote = ref("");
+const taggerError = ref("");
+
+async function loadTagger() {
+  try {
+    tagger.value = await $fetch<TaggerOptions>(`${apiBase}/api/settings`, {
+      credentials: "include",
+    });
+  } catch (e) {
+    console.error("Failed to load tagger settings:", e);
+  }
+}
+
+async function setTagger(key: keyof TaggerOptions, value: boolean) {
+  const previous = tagger.value[key];
+  tagger.value[key] = value;
+  taggerBusy.value = true;
+  taggerError.value = "";
+  try {
+    tagger.value = await $fetch<TaggerOptions>(`${apiBase}/api/settings`, {
+      method: "PUT",
+      credentials: "include",
+      body: { [key]: value },
+    });
+    taggerNote.value = "Saved";
+    setTimeout(() => (taggerNote.value = ""), 1500);
+  } catch (e) {
+    tagger.value[key] = previous;
+    taggerError.value = "Could not save that";
+    console.error("Failed to save tagger settings:", e);
+  } finally {
+    taggerBusy.value = false;
+  }
+}
 
 async function loadPlugins() {
   pluginsLoading.value = true
@@ -290,7 +344,10 @@ function openPlugin(id: string) {
   router.push(`/plugins/${id}`)
 }
 
-if (import.meta.client) loadPlugins()
+if (import.meta.client) {
+  loadPlugins();
+  loadTagger();
+}
 </script>
 
 <template>
@@ -587,6 +644,106 @@ if (import.meta.client) loadPlugins()
               </div>
             </div>
           </div>
+        </section>
+
+        <!-- Tagger -->
+        <section v-else-if="active === 'tagger'">
+          <div class="flex items-start justify-between mb-1">
+            <div>
+              <h2 class="text-lg font-semibold text-white">Tagger</h2>
+              <p class="text-sm text-gray-500">What a download writes into the files.</p>
+            </div>
+            <span v-if="taggerNote" class="text-xs text-green-400">{{ taggerNote }}</span>
+          </div>
+
+          <div class="mt-6 rounded-xl border border-white/10 bg-white/[0.02] divide-y divide-white/5">
+            <div class="flex items-start justify-between gap-6 px-5 py-4">
+              <div class="min-w-0">
+                <p class="text-sm text-white">Require MusicBrainz tags</p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Count a file as incomplete unless it carries the MusicBrainz identifiers. Without them an album can only be matched by text — which is what fails across scripts and licensing renames.
+                </p>
+              </div>
+              <button
+                :disabled="taggerBusy"
+                class="relative w-9 h-5 mt-0.5 rounded-full transition-colors disabled:opacity-50 shrink-0"
+                :class="tagger.requireMusicBrainzTags ? 'bg-orange-500' : 'bg-white/15'"
+                role="switch"
+                :aria-checked="tagger.requireMusicBrainzTags"
+                @click="setTagger('requireMusicBrainzTags', !tagger.requireMusicBrainzTags)"
+              >
+                <span
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                  :class="tagger.requireMusicBrainzTags ? 'left-[1.125rem]' : 'left-0.5'"
+                />
+              </button>
+            </div>
+            <div class="flex items-start justify-between gap-6 px-5 py-4">
+              <div class="min-w-0">
+                <p class="text-sm text-white">Embed cover art</p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Write the front cover into every track. Most players read art from the file, so without this the album looks blank in half of them.
+                </p>
+              </div>
+              <button
+                :disabled="taggerBusy"
+                class="relative w-9 h-5 mt-0.5 rounded-full transition-colors disabled:opacity-50 shrink-0"
+                :class="tagger.embedCover ? 'bg-orange-500' : 'bg-white/15'"
+                role="switch"
+                :aria-checked="tagger.embedCover"
+                @click="setTagger('embedCover', !tagger.embedCover)"
+              >
+                <span
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                  :class="tagger.embedCover ? 'left-[1.125rem]' : 'left-0.5'"
+                />
+              </button>
+            </div>
+            <div class="flex items-start justify-between gap-6 px-5 py-4">
+              <div class="min-w-0">
+                <p class="text-sm text-white">Write cover.jpg beside the tracks</p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Folder artwork, for players that look at the directory instead of the file.
+                </p>
+              </div>
+              <button
+                :disabled="taggerBusy"
+                class="relative w-9 h-5 mt-0.5 rounded-full transition-colors disabled:opacity-50 shrink-0"
+                :class="tagger.writeCoverFile ? 'bg-orange-500' : 'bg-white/15'"
+                role="switch"
+                :aria-checked="tagger.writeCoverFile"
+                @click="setTagger('writeCoverFile', !tagger.writeCoverFile)"
+              >
+                <span
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                  :class="tagger.writeCoverFile ? 'left-[1.125rem]' : 'left-0.5'"
+                />
+              </button>
+            </div>
+            <div class="flex items-start justify-between gap-6 px-5 py-4">
+              <div class="min-w-0">
+                <p class="text-sm text-white">Prefer the store's genre</p>
+                <p class="text-xs text-gray-500 mt-1">
+                  MusicBrainz genres are what listeners call the music (j-pop); the store's are marketing buckets (Asian Music). Off keeps MusicBrainz.
+                </p>
+              </div>
+              <button
+                :disabled="taggerBusy"
+                class="relative w-9 h-5 mt-0.5 rounded-full transition-colors disabled:opacity-50 shrink-0"
+                :class="tagger.preferProviderGenre ? 'bg-orange-500' : 'bg-white/15'"
+                role="switch"
+                :aria-checked="tagger.preferProviderGenre"
+                @click="setTagger('preferProviderGenre', !tagger.preferProviderGenre)"
+              >
+                <span
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
+                  :class="tagger.preferProviderGenre ? 'left-[1.125rem]' : 'left-0.5'"
+                />
+              </button>
+            </div>
+          </div>
+
+          <p v-if="taggerError" class="text-xs text-red-400 mt-3">{{ taggerError }}</p>
         </section>
 
         <section v-else-if="active === 'plugins'">
