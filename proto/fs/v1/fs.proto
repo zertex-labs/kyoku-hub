@@ -7,6 +7,12 @@ option go_package = "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1";
 // Envelope wraps all messages sent over the Hub <-> Fs WS connection.
 // Each message has exactly one payload field set.
 message Envelope {
+  // Correlates a reply with its request. Empty on one-way messages, which is
+  // most of them: a scan result or a progress line has nobody waiting. A request
+  // that needs an answer (what plugins does this agent have?) carries one, and
+  // the agent echoes it back.
+  string request_id = 100;
+
   oneof payload {
     // Auth handshake (hub -> fs)
     Challenge challenge = 1;

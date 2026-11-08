@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -41,6 +42,72 @@ type Conn struct {
 	UserID  string
 	ws      *websocket.Conn
 	mu      sync.Mutex
+
+	// pending holds the callers waiting for an answer to a request they sent.
+	// The channel is buffered so a reply that arrives just after the caller gave
+	// up does not block the reader for the rest of the connection's life.
+	pendingMu sync.Mutex
+	pending   map[string]chan *fspb.Envelope
+}
+
+// requestTTL is how long the hub waits for an agent to answer. An agent that is
+// rebooting is not going to answer, and a settings page must not hang on it.
+const requestTTL = 10 * time.Second
+
+// Await sends a request and waits for the agent's reply, matched by request id.
+func (c *Conn) Await(ctx context.Context, msg *fspb.Envelope, ttl time.Duration) (*fspb.Envelope, error) {
+	id := uuid.NewString()
+	msg.RequestId = id
+	ch := make(chan *fspb.Envelope, 1)
+
+	c.pendingMu.Lock()
+	if c.pending == nil {
+		c.pending = make(map[string]chan *fspb.Envelope)
+	}
+	c.pending[id] = ch
+	c.pendingMu.Unlock()
+
+	defer func() {
+		c.pendingMu.Lock()
+		delete(c.pending, id)
+		c.pendingMu.Unlock()
+	}()
+
+	if err := c.sendProto(msg); err != nil {
+		return nil, err
+	}
+	return waitReply(ctx, ch, ttl)
+}
+
+// waitReply is the part after the send: separated so it can be tested without a
+// websocket, which is where the interesting cases live (timeout, cancellation).
+func waitReply(ctx context.Context, ch chan *fspb.Envelope, ttl time.Duration) (*fspb.Envelope, error) {
+	if ttl <= 0 {
+		ttl = requestTTL
+	}
+	select {
+	case env := <-ch:
+		return env, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(ttl):
+		return nil, fmt.Errorf("the agent did not answer within %s", ttl)
+	}
+}
+
+// resolve delivers a reply to whoever is waiting for it, if anyone is.
+func (c *Conn) resolve(env *fspb.Envelope) bool {
+	if env.GetRequestId() == "" {
+		return false
+	}
+	c.pendingMu.Lock()
+	ch, ok := c.pending[env.GetRequestId()]
+	delete(c.pending, env.GetRequestId())
+	c.pendingMu.Unlock()
+	if ok {
+		ch <- env
+	}
+	return ok
 }
 
 func (c *Conn) sendProto(msg *fspb.Envelope) error {
@@ -282,6 +349,11 @@ func (m *Manager) readLoop(conn *Conn) {
 }
 
 func (m *Manager) handleMessage(conn *Conn, env *fspb.Envelope) {
+	// A reply belongs to a caller, not to the manager: hand it over first.
+	if conn.resolve(env) {
+		return
+	}
+
 	switch p := env.Payload.(type) {
 	case *fspb.Envelope_ScanResult:
 		m.processScanResult(conn, p.ScanResult)

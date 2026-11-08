@@ -241,6 +241,16 @@ func (c *Client) readLoop(ctx context.Context) {
 	}
 }
 
+// reply answers a request, echoing its id so the hub can match the two. Without
+// that the hub has no way to know which of several answers belongs to which
+// question, and would have to guess by shape.
+func (c *Client) reply(requestID string, env *fspb.Envelope) error {
+	if requestID != "" {
+		env.RequestId = requestID
+	}
+	return c.send(env)
+}
+
 func (c *Client) handleMessage(ctx context.Context, env *fspb.Envelope) {
 	switch p := env.Payload.(type) {
 	case *fspb.Envelope_SyncRequest:

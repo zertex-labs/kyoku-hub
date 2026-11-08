@@ -25,6 +25,11 @@ const (
 // Each message has exactly one payload field set.
 type Envelope struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlates a reply with its request. Empty on one-way messages, which is
+	// most of them: a scan result or a progress line has nobody waiting. A request
+	// that needs an answer (what plugins does this agent have?) carries one, and
+	// the agent echoes it back.
+	RequestId string `protobuf:"bytes,100,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Envelope_Challenge
@@ -68,6 +73,13 @@ func (x *Envelope) ProtoReflect() protoreflect.Message {
 // Deprecated: Use Envelope.ProtoReflect.Descriptor instead.
 func (*Envelope) Descriptor() ([]byte, []int) {
 	return file_fs_v1_fs_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Envelope) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *Envelope) GetPayload() isEnvelope_Payload {
@@ -1036,8 +1048,10 @@ var File_fs_v1_fs_proto protoreflect.FileDescriptor
 
 const file_fs_v1_fs_proto_rawDesc = "" +
 	"\n" +
-	"\x0efs/v1/fs.proto\x12\x05fs.v1\"\xdc\x03\n" +
-	"\bEnvelope\x120\n" +
+	"\x0efs/v1/fs.proto\x12\x05fs.v1\"\xfb\x03\n" +
+	"\bEnvelope\x12\x1d\n" +
+	"\n" +
+	"request_id\x18d \x01(\tR\trequestId\x120\n" +
 	"\tchallenge\x18\x01 \x01(\v2\x10.fs.v1.ChallengeH\x00R\tchallenge\x124\n" +
 	"\vauth_result\x18\x02 \x01(\v2\x11.fs.v1.AuthResultH\x00R\n" +
 	"authResult\x12I\n" +
