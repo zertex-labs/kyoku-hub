@@ -354,6 +354,14 @@ func (i *mbInfo) albumTitle() string {
 	return i.relTitle
 }
 
+// firstDate is the release group's first release date, used when no edition was
+// resolved but a year is still wanted.
+func (i *mbInfo) firstDate() string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.groupFirst
+}
+
 func (i *mbInfo) albumDate() string {
 	i.mu.Lock()
 	defer i.mu.Unlock()

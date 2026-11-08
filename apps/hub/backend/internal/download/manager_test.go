@@ -443,3 +443,30 @@ func readVorbis(t *testing.T, path string) map[string]string {
 	}
 	return out
 }
+
+// A download started from a search result often carries no year; the folder must
+// still be dated, because the edition knows when it came out.
+func TestAlbumYearFallsBackToMusicBrainz(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, nil, nil, nil)
+
+	fromRequest := &Job{JobView: JobView{Album: AlbumView{Year: "2021"}}}
+	if y := m.albumYear(fromRequest, &mbInfo{}); y != 2021 {
+		t.Errorf("request year = %d", y)
+	}
+
+	edition := &mbInfo{relDate: "2023-05-02"}
+	empty := &Job{}
+	if y := m.albumYear(empty, edition); y != 2023 {
+		t.Errorf("edition year = %d", y)
+	}
+
+	groupOnly := &mbInfo{groupFirst: "1999-08-10"}
+	if y := m.albumYear(empty, groupOnly); y != 1999 {
+		t.Errorf("group year = %d", y)
+	}
+
+	// Nothing known: no year, rather than a made-up one.
+	if y := m.albumYear(empty, &mbInfo{}); y != 0 {
+		t.Errorf("unknown year = %d, want 0", y)
+	}
+}

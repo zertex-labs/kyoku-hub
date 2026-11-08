@@ -436,7 +436,7 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 		AlbumTitle:     job.Album.Title,
 		AlbumArtist:    job.Album.Artist,
 		StagingRel:     filepath.ToSlash(filepath.Join(".staging", job.ID)),
-		LibraryRel:     filepath.ToSlash(AlbumDir(job.Album.Artist, job.Album.Title, atoi(job.Album.Year))),
+		LibraryRel:     filepath.ToSlash(AlbumDir(job.Album.Artist, job.Album.Title, m.albumYear(job, mb))),
 		Cover:          cover,
 		EmbedCover:     opts.EmbedCover,
 		WriteCoverFile: opts.WriteCoverFile,
@@ -512,6 +512,26 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 	job.log("ok", fmt.Sprintf("Done. %d/%d files · %s → %s", total, total, pick.cand.Floor.ShortLabel(), finalDir))
 	m.broadcast(job)
 	m.persist(job)
+}
+
+// albumYear is the year the folder should carry. The request usually has one
+// because the page knows the release group's date, but a download started from a
+// search result often does not — and the folder is named before MusicBrainz has
+// had a chance to say. "Welcome to MY World" with no year next to a library full
+// of dated folders is exactly that gap.
+func (m *Manager) albumYear(job *Job, mb *mbInfo) int {
+	if y := atoi(job.Album.Year); y > 0 {
+		return y
+	}
+	// The edition's date first, then the release group's first release.
+	for _, date := range []string{mb.albumDate(), mb.firstDate()} {
+		if len(date) >= 4 {
+			if y := atoi(date[:4]); y > 0 {
+				return y
+			}
+		}
+	}
+	return 0
 }
 
 // tagMessages renders an artifact's tag set for the wire.
