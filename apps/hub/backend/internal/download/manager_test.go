@@ -257,7 +257,7 @@ func TestFitDownloadsSilentlyAndPublishes(t *testing.T) {
 		t.Errorf("a fit must not produce candidates, got %d", len(done.Candidates))
 	}
 
-	albumDir := filepath.Join(root, "Daft Punk", "Discovery (2001)")
+	albumDir := filepath.Join(root, "Daft Punk", "[2001] Discovery")
 	for i, name := range []string{"01 - One More Time.flac", "02 - Aerodynamic.flac"} {
 		path := filepath.Join(albumDir, name)
 		if _, err := os.Stat(path); err != nil {
@@ -352,7 +352,7 @@ func TestPartialEndsInResultsAndPickDownloads(t *testing.T) {
 	}
 	// The extension follows the quality actually delivered per track, not the
 	// album's headline: this one was a 320, so it lands as .mp3 beside the FLACs.
-	if _, err := os.Stat(filepath.Join(root, "Daft Punk", "Discovery (2001)", "02 - Aerodynamic.mp3")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "Daft Punk", "[2001] Discovery", "02 - Aerodynamic.mp3")); err != nil {
 		t.Errorf("second track missing: %v", err)
 	}
 }

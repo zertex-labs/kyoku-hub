@@ -8,13 +8,14 @@ const apiBase = config.public.apiBaseUrl as string;
 
 const MAX_AGENTS = 3;
 
-type SectionId = "account" | "agents" | "connections" | "tagger" | "plugins"
+type SectionId = "account" | "agents" | "connections" | "tagger" | "library" | "plugins"
 
 const sections: { id: SectionId; label: string; icon: string }[] = [
   { id: "account", label: "Account", icon: "lucide:user" },
   { id: "agents", label: "File System Agents", icon: "lucide:hard-drive" },
   { id: "connections", label: "Connections", icon: "lucide:plug" },
   { id: "tagger", label: "Tagger", icon: "lucide:tags" },
+  { id: "library", label: "Library", icon: "lucide:folder-tree" },
   { id: "plugins", label: "Plugins", icon: "lucide:puzzle" },
 ];
 
@@ -236,7 +237,7 @@ watch(
   active,
   (v) => {
     if (v === "connections") fetchConnections();
-    if (v === "tagger") loadTagger();
+    if (v === "tagger" || v === "library") loadTagger();
   },
   { immediate: true },
 );
@@ -266,6 +267,7 @@ interface TaggerOptions {
   embedCover: boolean;
   writeCoverFile: boolean;
   preferProviderGenre: boolean;
+  albumPath: string;
 }
 
 const tagger = ref<TaggerOptions>({
@@ -273,6 +275,7 @@ const tagger = ref<TaggerOptions>({
   embedCover: true,
   writeCoverFile: true,
   preferProviderGenre: false,
+  albumPath: "{artist}/[{year}] {album}",
 });
 const taggerBusy = ref(false);
 const taggerNote = ref("");
@@ -283,8 +286,35 @@ async function loadTagger() {
     tagger.value = await $fetch<TaggerOptions>(`${apiBase}/api/settings`, {
       credentials: "include",
     });
+    albumPathDraft.value = tagger.value.albumPath;
   } catch (e) {
     console.error("Failed to load tagger settings:", e);
+  }
+}
+
+// The path template is free text: it saves when the field is left, not on every
+// keystroke, or a half-typed template would be applied to a download.
+const albumPathDraft = ref("");
+const albumPathError = ref("");
+
+async function saveAlbumPath() {
+  const value = albumPathDraft.value.trim();
+  if (!value || value === tagger.value.albumPath) return;
+  taggerBusy.value = true;
+  albumPathError.value = "";
+  try {
+    tagger.value = await $fetch<TaggerOptions>(`${apiBase}/api/settings`, {
+      method: "PUT",
+      credentials: "include",
+      body: { albumPath: value },
+    });
+    albumPathDraft.value = tagger.value.albumPath;
+    taggerNote.value = "Saved";
+    setTimeout(() => (taggerNote.value = ""), 1500);
+  } catch (e: any) {
+    albumPathError.value = e?.data?.message ?? "The path must contain {album}";
+  } finally {
+    taggerBusy.value = false;
   }
 }
 
@@ -744,6 +774,41 @@ if (import.meta.client) {
           </div>
 
           <p v-if="taggerError" class="text-xs text-red-400 mt-3">{{ taggerError }}</p>
+        </section>
+
+        <!-- Library -->
+        <section v-else-if="active === 'library'">
+          <div class="flex items-start justify-between mb-1">
+            <div>
+              <h2 class="text-lg font-semibold text-white">Library</h2>
+              <p class="text-sm text-gray-500">Where downloads land and what they are called.</p>
+            </div>
+            <span v-if="taggerNote" class="text-xs text-green-400">{{ taggerNote }}</span>
+          </div>
+
+          <div class="mt-6 rounded-xl border border-white/10 bg-white/[0.02] p-5">
+            <label class="block text-sm text-white mb-1">Album folder</label>
+            <p class="text-xs text-gray-500 mb-3">
+              Placeholders: <code class="text-gray-400">{artist}</code>,
+              <code class="text-gray-400">{albumartist}</code>,
+              <code class="text-gray-400">{album}</code>,
+              <code class="text-gray-400">{year}</code>. A folder without a year drops the
+              brackets with it, so <code class="text-gray-400">[{year}] {album}</code> still
+              works for undated albums.
+            </p>
+            <input
+              v-model="albumPathDraft"
+              class="w-full rounded-lg bg-black/30 border border-white/10 px-3 py-2 text-sm text-white font-mono focus:border-orange-500/60 focus:outline-none"
+              spellcheck="false"
+              placeholder="{artist}/[{year}] {album}"
+              @blur="saveAlbumPath"
+              @keyup.enter="saveAlbumPath"
+            />
+            <p class="text-xs text-gray-600 mt-2">
+              Example: <span class="text-gray-400">aespa/[2024] Armageddon</span>
+            </p>
+            <p v-if="albumPathError" class="text-xs text-red-400 mt-2">{{ albumPathError }}</p>
+          </div>
         </section>
 
         <section v-else-if="active === 'plugins'">

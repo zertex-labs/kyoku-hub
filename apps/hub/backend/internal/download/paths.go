@@ -5,12 +5,19 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/zertex-labs/kyoku-hub/apps/hub/backend/internal/settings"
 )
 
-// Disk layout — pinned in docs/downloader-plan.md §7:
+// Disk layout — the album folder is a template the user owns:
 //
-//	<root>/<albumartist>/<album> (<year>)/<NN> - <title>.<ext>
-//	                                          /cover.jpg
+//	<root>/<rendered album path>/<NN> - <title>.<ext>
+//	                            /cover.jpg
+//
+// The default is "Artist/[Year] Album", which is what Picard produces and
+// therefore what an existing library already looks like. Anything else is a
+// setting, not a fork of the code: a second naming scheme in one library is what
+// makes re-tagging and de-duplication miserable.
 //
 // Disc prefix only when the release has more than one disc ("1-01 Title.flac"):
 // the two-digit form is what every other tool in this space expects, and adding
@@ -59,6 +66,9 @@ func Sanitize(s string) string {
 }
 
 // AlbumDir is the publish directory for a release, relative to the library root.
+//
+// Kept as the untemplated form so callers that only need "artist/album (year)"
+// stay readable; AlbumDirFor is what the download path uses.
 func AlbumDir(albumArtist, album string, year int) string {
 	artist := Sanitize(albumArtist)
 	if artist == "" {
@@ -72,6 +82,64 @@ func AlbumDir(albumArtist, album string, year int) string {
 		name = fmt.Sprintf("%s (%d)", name, year)
 	}
 	return filepath.Join(artist, name)
+}
+
+// AlbumDirFor renders an album path template:
+//
+//	{artist}      album artist, falling back to the track artist
+//	{albumartist} the same value, for people who write it out
+//	{album}       album title
+//	{year}        four-digit year, empty when unknown
+//
+// A segment that renders empty takes its decoration with it: with no year,
+// "[{year}] {album}" becomes "{album}", not "[] Album". Every segment is
+// sanitised separately so a "/" in a title cannot invent a directory.
+func AlbumDirFor(template, albumArtist, artist, album string, year int) string {
+	if strings.TrimSpace(template) == "" {
+		template = settings.DefaultAlbumPath
+	}
+
+	artistName := albumArtist
+	if artistName == "" {
+		artistName = artist
+	}
+	albumName := album
+	if albumName == "" {
+		albumName = "Unknown Album"
+	}
+
+	yearText := ""
+	if year > 0 {
+		yearText = fmt.Sprintf("%d", year)
+	}
+
+	// Substitute per segment, not over the whole path: an artist called "AC/DC"
+	// must not become two directories.
+	out := make([]string, 0, 3)
+	for _, seg := range strings.Split(template, "/") {
+		if year == 0 {
+			// A missing year takes its decoration with it.
+			seg = strings.ReplaceAll(seg, "[{year}]", "")
+			seg = strings.ReplaceAll(seg, "({year})", "")
+		}
+		seg = strings.NewReplacer(
+			"{artist}", artistName,
+			"{albumartist}", artistName,
+			"{album}", albumName,
+			"{year}", yearText,
+		).Replace(seg)
+
+		seg = strings.Join(strings.Fields(seg), " ")
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		out = append(out, Sanitize(seg))
+	}
+	if len(out) == 0 {
+		return filepath.Join("Unknown Artist", Sanitize(albumName))
+	}
+	return filepath.Join(out...)
 }
 
 // TrackFileName is "NN - Title.ext", or "D-NN - Title.ext" when disc > 1.

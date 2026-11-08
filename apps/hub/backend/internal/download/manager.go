@@ -431,12 +431,13 @@ func (m *Manager) download(ctx context.Context, job *Job, pick sourcePick) {
 	}
 
 	album := &fspb.WriteAlbum{
-		JobId:          job.ID,
-		Kind:           "download",
-		AlbumTitle:     job.Album.Title,
-		AlbumArtist:    job.Album.Artist,
-		StagingRel:     filepath.ToSlash(filepath.Join(".staging", job.ID)),
-		LibraryRel:     filepath.ToSlash(AlbumDir(job.Album.Artist, job.Album.Title, m.albumYear(job, mb))),
+		JobId:       job.ID,
+		Kind:        "download",
+		AlbumTitle:  job.Album.Title,
+		AlbumArtist: job.Album.Artist,
+		StagingRel:  filepath.ToSlash(filepath.Join(".staging", job.ID)),
+		LibraryRel: filepath.ToSlash(AlbumDirFor(
+			opts.AlbumPath, job.Album.Artist, job.Album.Artist, job.Album.Title, m.albumYear(job, mb))),
 		Cover:          cover,
 		EmbedCover:     opts.EmbedCover,
 		WriteCoverFile: opts.WriteCoverFile,

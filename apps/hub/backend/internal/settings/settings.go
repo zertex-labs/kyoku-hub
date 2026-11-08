@@ -12,6 +12,10 @@ import (
 	"github.com/zertex-labs/kyoku-hub/packages/validation"
 )
 
+// DefaultAlbumPath is the album folder a library gets unless it asks otherwise:
+// Picard's convention, which is what an existing collection already looks like.
+const DefaultAlbumPath = "{artist}/[{year}] {album}"
+
 // Options is the tagger configuration.
 type Options struct {
 	// RequireMusicBrainzTags makes the identifiers a requirement rather than a
@@ -28,12 +32,21 @@ type Options struct {
 	// label ("Asian Music"); MusicBrainz's is usually what a listener would say
 	// ("j-pop"), which is why it is the default.
 	PreferProviderGenre bool `json:"preferProviderGenre"`
+
+	// AlbumPath is the folder template a download lands in, relative to the
+	// agent's library root. Placeholders: {artist}, {albumartist}, {album},
+	// {year}. Defaults to Picard's "Artist/[Year] Album".
+	AlbumPath string `json:"albumPath"`
 }
 
 // Default is what a user who never opened settings gets: the behaviour of the
 // tagger before it was configurable.
 func Default() Options {
-	return Options{EmbedCover: true, WriteCoverFile: true}
+	return Options{
+		EmbedCover:     true,
+		WriteCoverFile: true,
+		AlbumPath:      DefaultAlbumPath,
+	}
 }
 
 // Validate keeps nonsense out of the store.

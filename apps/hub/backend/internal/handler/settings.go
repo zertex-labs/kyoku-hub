@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -44,10 +45,11 @@ func (h *SettingsHandler) Put(c echo.Context) error {
 	current := h.store.Get(ctx, user.ID)
 
 	var body struct {
-		RequireMusicBrainzTags *bool `json:"requireMusicBrainzTags"`
-		EmbedCover             *bool `json:"embedCover"`
-		WriteCoverFile         *bool `json:"writeCoverFile"`
-		PreferProviderGenre    *bool `json:"preferProviderGenre"`
+		RequireMusicBrainzTags *bool   `json:"requireMusicBrainzTags"`
+		EmbedCover             *bool   `json:"embedCover"`
+		WriteCoverFile         *bool   `json:"writeCoverFile"`
+		PreferProviderGenre    *bool   `json:"preferProviderGenre"`
+		AlbumPath              *string `json:"albumPath"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid body")
@@ -64,6 +66,15 @@ func (h *SettingsHandler) Put(c echo.Context) error {
 	}
 	if body.PreferProviderGenre != nil {
 		current.PreferProviderGenre = *body.PreferProviderGenre
+	}
+	if body.AlbumPath != nil {
+		current.AlbumPath = strings.TrimSpace(*body.AlbumPath)
+		if current.AlbumPath == "" {
+			current.AlbumPath = settings.DefaultAlbumPath
+		}
+		if !strings.Contains(current.AlbumPath, "{album}") {
+			return echo.NewHTTPError(http.StatusBadRequest, "the album path must contain {album}")
+		}
 	}
 	if err := current.Validate(); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
