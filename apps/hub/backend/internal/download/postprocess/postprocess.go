@@ -24,22 +24,31 @@ type Artifact struct {
 	AlbumArtist    string
 	Artist         string
 	Year           string // YYYY-MM-DD when known, else YYYY
-	Genre          string
+	Genres         []string
 	Label          string
 	ReleaseType    string // album | single | ep
+	ReleaseStatus  string // Official, Promotion, Bootleg…
+	ReleaseCountry string // ISO code of the edition
+	CatalogNumber  string // the edition's catalogue number
+	Barcode        string
+	OriginalDate   string // first release of the group, YYYY-MM-DD
 	ReleaseGroupID string
 	DiscTotal      int
 
 	// Track level.
-	Title       string
-	Track       int
-	TrackTotal  int
-	Disc        int
-	ISRC        string
-	MBTrackID   string // MusicBrainz recording id
-	MBArtistID  string
-	MBAlbumID   string
-	MBReleaseID string
+	Title           string
+	Track           int
+	TrackTotal      int
+	Disc            int
+	ISRC            string
+	MBTrackID       string // MusicBrainz recording id
+	MBArtistID      string
+	MBAlbumArtistID string // the release artist, which differs on compilations
+	MBAlbumID       string
+	MBReleaseID     string
+
+	ArtistSort      string
+	AlbumArtistSort string
 
 	// Cover holds the album artwork, shared by every file in the album.
 	Cover []byte

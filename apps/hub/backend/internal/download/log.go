@@ -28,7 +28,9 @@ func metadataLines(job *Job, cand downloader.AlbumCandidate, mb *mbInfo, cover [
 	if date != "" {
 		album = append(album, date)
 	}
-	if cand.Genre != "" {
+	if genres := mb.genres(); len(genres) > 0 {
+		album = append(album, strings.Join(genres, ", "))
+	} else if cand.Genre != "" {
 		album = append(album, cand.Genre)
 	}
 	if label != "" {

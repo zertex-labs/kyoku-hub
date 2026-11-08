@@ -31,12 +31,22 @@ type mbInfo struct {
 	release string
 	rec     map[string]string // isrc -> recording id
 
-	relTitle string // the chosen release's title, date and label
-	relDate  string
-	relLabel string
-	relID    string
-	pending  map[string]bool // isrcs not yet looked up
-	err      string
+	relTitle   string // the chosen release's title, date and label
+	relDate    string
+	relLabel   string
+	relID      string
+	relStatus  string
+	relCountry string
+	relCatalog string
+	relBarcode string
+
+	groupGenres    []string
+	groupFirst     string // first release date of the group
+	groupPrimary   string // Album, Single, EP…
+	groupSecondary []string
+	artistSort     string
+	pending        map[string]bool // isrcs not yet looked up
+	err            string
 }
 
 type mbRelease struct {
@@ -53,13 +63,23 @@ type mbMediaOpt struct {
 }
 
 type mbGroupResp struct {
-	ID           string `json:"id"`
-	PrimaryType  string `json:"primary-type"`
-	FirstRelease string `json:"first-release-date"`
+	ID            string   `json:"id"`
+	PrimaryType   string   `json:"primary-type"`
+	SecondaryType []string `json:"secondary-types"`
+	FirstRelease  string   `json:"first-release-date"`
+	Genres        []struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	} `json:"genres"`
+	Tags []struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	} `json:"tags"`
 	ArtistCredit []struct {
 		Name   string `json:"name"`
 		Artist struct {
-			ID string `json:"id"`
+			ID       string `json:"id"`
+			SortName string `json:"sort-name"`
 		} `json:"artist"`
 	} `json:"artist-credit"`
 	Releases []mbRelease `json:"releases"`
@@ -72,6 +92,7 @@ type mbReleaseResp struct {
 	Date      string `json:"date"`
 	Country   string `json:"country"`
 	Status    string `json:"status"`
+	Barcode   string `json:"barcode"`
 	LabelInfo []struct {
 		Label struct {
 			Name string `json:"name"`
@@ -79,6 +100,16 @@ type mbReleaseResp struct {
 		CatalogNumber string `json:"catalog-number"`
 	} `json:"label-info"`
 	Media []mbMediaOpt `json:"media"`
+}
+
+// CatalogNumber is the edition's identifier at its label.
+func (r mbReleaseResp) CatalogNumber() string {
+	for _, l := range r.LabelInfo {
+		if l.CatalogNumber != "" {
+			return l.CatalogNumber
+		}
+	}
+	return ""
 }
 
 // LabelName is the imprint of the edition, without the catalogue number.
@@ -113,6 +144,36 @@ func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand do
 		return info
 	}
 
+	// The release group is fetched before the first file is written: genres, the
+	// release type, the artist id and its sort name are album-level tags, and a
+	// value that arrives after the last file is written is not a tag at all.
+	var group mbGroupResp
+	if err := m.mb.get(ctx, "/release-group/"+rgid+"?fmt=json&inc=artist-credits+releases+media+genres", &group); err == nil {
+		if len(group.ArtistCredit) > 0 {
+			info.artist = group.ArtistCredit[0].Artist.ID
+			info.artistSort = group.ArtistCredit[0].Artist.SortName
+		}
+		info.groupFirst = group.FirstRelease
+		info.groupPrimary = group.PrimaryType
+		info.groupSecondary = group.SecondaryType
+		// Genres by vote count: "j-pop", not the provider's regional label
+		// ("Asian Music", translated per country).
+		for _, g := range group.Genres {
+			info.groupGenres = append(info.groupGenres, g.Name)
+		}
+		// Only claim a release when exactly one matches what we downloaded:
+		// several editions of the same group are normal, and a wrong
+		// MUSICBRAINZ_ALBUMID is worse than none. A release the user chose
+		// needs no guessing at all.
+		if releaseID != "" {
+			info.release = releaseID
+		} else if id := pickRelease(group.Releases, len(cand.Tracks)); id != "" {
+			info.release = id
+		}
+	} else {
+		info.err = err.Error()
+	}
+
 	// One request, synchronously, because the album title, date and label go into
 	// the very first file. The per-track ISRC lookups below can lag; these cannot.
 	if releaseID != "" && looksLikeUUID(releaseID) {
@@ -122,6 +183,10 @@ func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand do
 			info.relTitle = rel.Title
 			info.relDate = rel.Date
 			info.relLabel = rel.LabelName()
+			info.relStatus = rel.Status
+			info.relCountry = rel.Country
+			info.relBarcode = rel.Barcode
+			info.relCatalog = rel.CatalogNumber()
 		}
 	}
 
@@ -147,33 +212,8 @@ func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand do
 			return
 		}
 
-		var group mbGroupResp
-		path := "/release-group/" + rgid + "?fmt=json&inc=artist-credits+releases+media"
-		if err := mb.get(ctx, path, &group); err != nil {
-			info.mu.Lock()
-			info.err = err.Error()
-			info.pending = nil
-			info.mu.Unlock()
-			return
-		}
-
-		artistID := ""
-		if len(group.ArtistCredit) > 0 {
-			artistID = group.ArtistCredit[0].Artist.ID
-		}
-
-		info.mu.Lock()
-		info.artist = artistID
-		// Only claim a release when exactly one matches what we downloaded:
-		// several editions of the same group are normal, and a wrong
-		// MUSICBRAINZ_ALBUMID is worse than none. A release the user chose
-		// needs no guessing at all.
-		if info.chosen != "" {
-			info.release = info.chosen
-		} else if id := pickRelease(group.Releases, len(cand.Tracks)); id != "" {
-			info.release = id
-		}
 		isrcs := make([]string, 0, len(info.pending))
+		info.mu.Lock()
 		for isrc := range info.pending {
 			isrcs = append(isrcs, isrc)
 		}
@@ -298,6 +338,37 @@ func (i *mbInfo) albumLabel() string {
 	defer i.mu.Unlock()
 	return i.relLabel
 }
+
+func (i *mbInfo) releaseStatus() string  { i.mu.Lock(); defer i.mu.Unlock(); return i.relStatus }
+func (i *mbInfo) releaseCountry() string { i.mu.Lock(); defer i.mu.Unlock(); return i.relCountry }
+func (i *mbInfo) catalogNumber() string  { i.mu.Lock(); defer i.mu.Unlock(); return i.relCatalog }
+func (i *mbInfo) barcode() string        { i.mu.Lock(); defer i.mu.Unlock(); return i.relBarcode }
+func (i *mbInfo) genres() []string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return append([]string(nil), i.groupGenres...)
+}
+func (i *mbInfo) firstRelease() string   { i.mu.Lock(); defer i.mu.Unlock(); return i.groupFirst }
+func (i *mbInfo) artistSortName() string { i.mu.Lock(); defer i.mu.Unlock(); return i.artistSort }
+
+// releaseType is the group's primary type, with any secondary types appended the
+// way MusicBrainz presents them ("album + compilation").
+func (i *mbInfo) releaseType() string {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.groupPrimary == "" {
+		return ""
+	}
+	out := strings.ToLower(i.groupPrimary)
+	for _, s := range i.groupSecondary {
+		out += " + " + strings.ToLower(s)
+	}
+	return out
+}
+
+// albumArtistID is the release artist: the same credit as the group's here,
+// which is wrong only for compilations that name a various-artists credit.
+func (i *mbInfo) albumArtistID() string { return i.artistID() }
 
 func (i *mbInfo) releaseID() string {
 	i.mu.Lock()

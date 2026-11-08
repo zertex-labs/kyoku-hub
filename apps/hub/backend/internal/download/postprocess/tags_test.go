@@ -9,7 +9,9 @@ import (
 	flac "github.com/go-flac/go-flac"
 )
 
-func comments(t *testing.T, path string) map[string]string {
+// commentList returns every KEY=VALUE pair, in order: genres are multi-valued and
+// a map would silently keep only the last one.
+func commentList(t *testing.T, path string) []string {
 	t.Helper()
 	f, err := flac.ParseFile(path)
 	if err != nil {
@@ -23,20 +25,37 @@ func comments(t *testing.T, path string) map[string]string {
 		if err != nil {
 			t.Fatalf("parse comments: %v", err)
 		}
-		out := make(map[string]string, len(cmt.Comments))
-		for _, c := range cmt.Comments {
-			kv := strings.SplitN(c, "=", 2)
-			if len(kv) == 2 {
-				out[kv[0]] = kv[1]
-			}
-		}
-		return out
+		return cmt.Comments
 	}
 	t.Fatalf("no vorbis comment block")
 	return nil
 }
 
-func TestTagsWritesTheWholeSet(t *testing.T) {
+func comments(t *testing.T, path string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, c := range commentList(t, path) {
+		kv := strings.SplitN(c, "=", 2)
+		if len(kv) == 2 {
+			out[kv[0]] = kv[1]
+		}
+	}
+	return out
+}
+
+func countKey(list []string, key string) int {
+	n := 0
+	for _, c := range list {
+		if strings.HasPrefix(c, key+"=") {
+			n++
+		}
+	}
+	return n
+}
+
+// The key set is the contract: a file kyoku tags must mean the same thing to
+// other taggers, so every key Picard writes for this data is written here too.
+func TestTagsWriteThePicardKeySet(t *testing.T) {
 	path := fakeFLAC(t, "01 - DND.flac")
 	if err := (Tags{}).Process(context.Background(), artifactFor(path, ".flac")); err != nil {
 		t.Fatalf("process: %v", err)
@@ -49,23 +68,38 @@ func TestTagsWritesTheWholeSet(t *testing.T) {
 		"ALBUM":                      "DND",
 		"TRACKNUMBER":                "1",
 		"TRACKTOTAL":                 "12",
+		"TOTALTRACKS":                "12",
 		"DISCNUMBER":                 "1",
 		"DISCTOTAL":                  "2",
+		"TOTALDISCS":                 "2",
 		"DATE":                       "2026-11-04",
-		"GENRE":                      "J-Pop",
+		"ORIGINALDATE":               "2026-10-15",
 		"ISRC":                       "JPPO02601234",
 		"LABEL":                      "Virgin Music",
+		"CATALOGNUMBER":              "TYCT-60123",
+		"BARCODE":                    "4988061861234",
 		"RELEASETYPE":                "album",
+		"RELEASESTATUS":              "Official",
+		"RELEASECOUNTRY":             "JP",
 		"MUSICBRAINZ_TRACKID":        "662ec667-2102-41a2-a9e0-3b46da7af447",
 		"MUSICBRAINZ_ARTISTID":       "e134b52f-2e9e-4734-9bc3-bea9648d1fa1",
+		"MUSICBRAINZ_ALBUMARTISTID":  "e134b52f-2e9e-4734-9bc3-bea9648d1fa1",
 		"MUSICBRAINZ_ALBUMID":        "99cc17f3-3d4e-4cf7-9569-1a84ac1f9658",
 		"MUSICBRAINZ_RELEASEGROUPID": "cbc7a5a2-3298-4f59-bddc-16e4a2d36311",
+		"ARTISTSORT":                 "Ado",
+		"ALBUMARTISTSORT":            "Ado",
 	}
 	got := comments(t, path)
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
 		}
+	}
+
+	// Genres are multi-valued: both survive, as separate GENRE comments.
+	list := commentList(t, path)
+	if n := countKey(list, "GENRE"); n != 2 {
+		t.Fatalf("GENRE comments = %d, want 2 (%v)", n, list)
 	}
 }
 
@@ -108,21 +142,15 @@ func TestTagsAreIdempotentAndPreserveForeignComments(t *testing.T) {
 		t.Errorf("foreign comments dropped: %v", got)
 	}
 
-	f, _ = flac.ParseFile(path)
-	n := 0
-	for _, m := range f.Meta {
-		if m.Type == flac.VorbisComment {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Errorf("comment blocks = %d, want 1", n)
+	// The multi-valued key must not accumulate a second copy either.
+	if n := countKey(commentList(t, path), "GENRE"); n != 2 {
+		t.Errorf("GENRE comments = %d after two runs, want 2", n)
 	}
 }
 
 // A format without a writer must say so instead of failing the download.
 func TestTagsSkipFormatsWithoutAWriter(t *testing.T) {
-	err := (Tags{}).Process(context.Background(), artifactFor(fakeFLAC(t, "01 - DND.mp3"), ".mp3"))
+	err := (Tags{}).Process(context.Background(), artifactFor(fakeFLAC(t, "01 - DND.m4a"), ".m4a"))
 	if err == nil {
 		t.Fatal("expected a skip")
 	}
@@ -131,7 +159,7 @@ func TestTagsSkipFormatsWithoutAWriter(t *testing.T) {
 	if !skipped {
 		t.Fatalf("not reported as a skip: %v", err)
 	}
-	if !strings.Contains(reason, "mp3") {
+	if !strings.Contains(reason, "m4a") {
 		t.Errorf("skip reason = %q", reason)
 	}
 	if out.Failed() {

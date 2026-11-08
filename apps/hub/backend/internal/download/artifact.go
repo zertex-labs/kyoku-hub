@@ -42,9 +42,14 @@ func (m *Manager) artifact(
 		AlbumArtist:    artist,
 		Artist:         artist,
 		Year:           firstNonEmptyString(mb.albumDate(), dateFor(job, cand)),
-		Genre:          cand.Genre,
+		Genres:         firstNonEmptyStrings(mb.genres(), cand.Genre),
 		Label:          firstNonEmptyString(mb.albumLabel(), cand.Label),
-		ReleaseType:    cand.Format,
+		ReleaseType:    firstNonEmptyString(mb.releaseType(), cand.Format),
+		ReleaseStatus:  mb.releaseStatus(),
+		ReleaseCountry: mb.releaseCountry(),
+		CatalogNumber:  mb.catalogNumber(),
+		Barcode:        mb.barcode(),
+		OriginalDate:   mb.firstRelease(),
 		ReleaseGroupID: job.RGID,
 		DiscTotal:      discCount(cand),
 
@@ -54,12 +59,28 @@ func (m *Manager) artifact(
 		Disc:       tr.Disc,
 		ISRC:       tr.ISRC,
 
-		MBTrackID:  mb.recording(context.Background(), tr.ISRC, mbWait),
-		MBArtistID: mb.artistID(),
-		MBAlbumID:  mb.releaseID(),
+		MBTrackID:       mb.recording(context.Background(), tr.ISRC, mbWait),
+		MBArtistID:      mb.artistID(),
+		MBAlbumArtistID: mb.albumArtistID(),
+		MBAlbumID:       mb.releaseID(),
+
+		ArtistSort:      mb.artistSortName(),
+		AlbumArtistSort: mb.artistSortName(),
 
 		Cover: cover,
 	}
+}
+
+// firstNonEmptyStrings prefers the resolved list and falls back to the single
+// provider genre, so a release MusicBrainz has no genres for still gets one.
+func firstNonEmptyStrings(list []string, fallback string) []string {
+	if len(list) > 0 {
+		return list
+	}
+	if fallback != "" {
+		return []string{fallback}
+	}
+	return nil
 }
 
 // WriteCover stores cover art beside the tracks too: media servers that scan
