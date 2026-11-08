@@ -114,6 +114,30 @@ const LOG_STYLE: Record<string, string> = {
 
 const trackWord = (n: number) => (n === 1 ? 'track' : 'tracks')
 
+// Copying the pane by hand drags the row decoration along with it, so the
+// explicit copy hands over the messages and nothing else.
+const copied = ref(false)
+
+async function copyLog() {
+  const text = (props.job?.log ?? []).map((l) => l.text).join("\n")
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // Clipboard API needs a secure context; the textarea trick works anywhere.
+    const el = document.createElement("textarea")
+    el.value = text
+    el.style.position = "fixed"
+    el.style.opacity = "0"
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand("copy")
+    document.body.removeChild(el)
+  }
+  copied.value = true
+  setTimeout(() => (copied.value = false), 1500)
+}
+
 // "2026 · 11 tracks", and just "11 tracks" when the provider gave no year —
 // the naive template produced a naked "·" and glued the count to the word.
 // One modal, three jobs. The kind changes the wording and which controls make
@@ -276,7 +300,20 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   <p class="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
                     Output
                   </p>
-                  <p class="text-[10px] text-gray-600">{{ j.log.length }} lines</p>
+                  <div class="flex items-center gap-2">
+                    <p class="text-[10px] text-gray-600">{{ j.log.length }} lines</p>
+                    <button
+                      class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-gray-500 hover:text-white hover:bg-white/5 transition-colors"
+                      :title="copied ? 'Copied' : 'Copy the output'"
+                      @click="copyLog"
+                    >
+                      <Icon
+                        :name="copied ? 'lucide:check' : 'lucide:clipboard'"
+                        class="w-3 h-3"
+                      />
+                      {{ copied ? "Copied" : "Copy" }}
+                    </button>
+                  </div>
                 </div>
                 <div
                   ref="logEl"
@@ -284,7 +321,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                 >
                   <p v-for="(l, i) in j.log" :key="i" :class="LOG_STYLE[l.level]">
                     <span class="text-gray-700 select-none">{{ l.t }}</span>
-                    <span class="mx-1.5 text-gray-800">|</span>{{ l.text }}
+                    <span class="mx-1.5 text-gray-800 select-none">|</span>{{ l.text }}
                   </p>
                   <p v-if="!j.log.length" class="text-gray-700">waiting…</p>
                 </div>
