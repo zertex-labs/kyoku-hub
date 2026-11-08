@@ -342,41 +342,71 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 	job.mu.Unlock()
 	m.broadcast(job)
 
+	// Every copy of the album, not just the one the record names.
+	dirs := m.albumDirs(dir, job.RGID)
+	total := 0
+	for _, d := range dirs {
+		if fs, err := audioFilesIn(d); err == nil {
+			total += len(fs)
+		}
+	}
+
+	job.mu.Lock()
+	job.Phase = PhaseWorking
+	job.Progress = &Progress{Total: total}
+	job.mu.Unlock()
+	m.broadcast(job)
+
 	done := 0
 	skips := make(map[string]bool, len(chain.Names()))
-	for _, f := range files {
-		if ctx.Err() != nil {
-			return
+	for _, d := range dirs {
+		if d != dir {
+			job.log("info", "also · "+m.displayPath(d)+" — another copy of this album")
 		}
-		v, err := postprocess.ReadTags(f)
+		dirFiles, err := audioFilesIn(d)
 		if err != nil {
+			job.log("warn", "cannot read "+m.displayPath(d)+": "+err.Error())
 			continue
 		}
-		n := v.Track
-		if n == 0 {
-			n = 1
-		}
-		tq := downloader.TrackQuality{
-			Title: v.Title, Number: n, Disc: v.Disc, ISRC: v.ISRC, Known: true,
-		}
-		art := m.artifact(job, tq, cand, mb, f, filepath.Ext(f), cover)
-		keepKnownIDs(&art, v)
-		for _, o := range chain.Run(ctx, &art) {
-			if reason, skipped := o.Skipped(); skipped {
-				// One album, one reason: eleven identical lines made the log
-				// look like eleven problems.
-				if !skips[o.Name] {
-					skips[o.Name] = true
-					job.log("info", o.Name+" · "+reason+" (applies to every file here)")
-				}
-			} else if o.Err != nil {
-				job.log("error", filepath.Base(f)+": "+o.Name+" — "+o.Err.Error())
+		if opts.WriteCoverFile && len(cover) > 0 {
+			if err := WriteCover(d, cover); err != nil {
+				job.log("warn", "could not write cover.jpg: "+err.Error())
 			}
 		}
-		done++
-		job.setProgress(done, filepath.Base(f))
-		job.log("info", fmt.Sprintf("t%02d retagged · %s", n, filepath.Base(f)))
-		m.broadcast(job)
+		for _, f := range dirFiles {
+			if ctx.Err() != nil {
+				return
+			}
+			v, err := postprocess.ReadTags(f)
+			if err != nil {
+				continue
+			}
+			n := v.Track
+			if n == 0 {
+				n = 1
+			}
+			tq := downloader.TrackQuality{
+				Title: v.Title, Number: n, Disc: v.Disc, ISRC: v.ISRC, Known: true,
+			}
+			art := m.artifact(job, tq, cand, mb, f, filepath.Ext(f), cover)
+			keepKnownIDs(&art, v)
+			for _, o := range chain.Run(ctx, &art) {
+				if reason, skipped := o.Skipped(); skipped {
+					// One album, one reason: eleven identical lines made the log
+					// look like eleven problems.
+					if !skips[o.Name] {
+						skips[o.Name] = true
+						job.log("info", o.Name+" · "+reason+" (applies to every file here)")
+					}
+				} else if o.Err != nil {
+					job.log("error", filepath.Base(f)+": "+o.Name+" — "+o.Err.Error())
+				}
+			}
+			done++
+			job.setProgress(done, filepath.Base(f))
+			job.log("info", fmt.Sprintf("t%02d retagged · %s", n, filepath.Base(f)))
+			m.broadcast(job)
+		}
 	}
 
 	job.mu.Lock()
@@ -394,6 +424,15 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 	if m.OnPublish != nil {
 		m.OnPublish(job.userID, job.agentID)
 	}
+}
+
+// displayPath shows a library path the way the user recognises it: relative to
+// the library root.
+func (m *Manager) displayPath(dir string) string {
+	if rel, err := filepath.Rel(m.root, dir); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return dir
 }
 
 func audioFilesIn(dir string) ([]string, error) {
@@ -523,14 +562,26 @@ func plural(n int, one, many string) string {
 // tool has its own idea of that ("Armageddon (2024)" vs "[2024] Armageddon - The
 // 1st Album") — so the tag decides and the walk only narrows the search.
 func (m *Manager) FindAlbumDir(rgID string) string {
-	if rgID == "" || m.root == "" {
+	dirs := m.FindAlbumDirs(rgID)
+	if len(dirs) == 0 {
 		return ""
 	}
+	return dirs[0]
+}
 
-	var found string
+// FindAlbumDirs returns every folder that holds this release group. A library can
+// contain the same album twice — a re-download into a different folder, a copy
+// from before kyoku existed — and one untagged copy is enough to keep the album
+// incomplete, so a re-tag has to see all of them.
+func (m *Manager) FindAlbumDirs(rgID string) []string {
+	if rgID == "" || m.root == "" {
+		return nil
+	}
+
+	var found []string
 	root := m.root
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || found != "" {
+		if err != nil {
 			return nil
 		}
 		if !d.IsDir() {
@@ -555,12 +606,30 @@ func (m *Manager) FindAlbumDir(rgID string) string {
 				continue
 			}
 			if v.ReleaseGroupID == rgID {
-				found = path
-				return nil
+				found = append(found, path)
+				return filepath.SkipDir
 			}
 			break // the first readable file speaks for the album
 		}
 		return nil
 	})
 	return found
+}
+
+// albumDirs is the folder the download record names plus every other folder that
+// carries the same release group, once each and in a stable order.
+func (m *Manager) albumDirs(dir, rgID string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	if dir != "" {
+		out = append(out, dir)
+		seen[dir] = true
+	}
+	for _, d := range m.FindAlbumDirs(rgID) {
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return out
 }
