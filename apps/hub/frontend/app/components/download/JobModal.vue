@@ -116,11 +116,26 @@ const trackWord = (n: number) => (n === 1 ? 'track' : 'tracks')
 
 // "2026 · 11 tracks", and just "11 tracks" when the provider gave no year —
 // the naive template produced a naked "·" and glued the count to the word.
-const subtitle = computed(() =>
-  [props.job?.album.year || "", `${props.job?.album.trackCount ?? 0} ${trackWord(props.job?.album.trackCount ?? 0)}`]
+// One modal, three jobs. The kind changes the wording and which controls make
+// sense — a re-tag has no sources and no probe budget, an inspect has both but
+// never downloads.
+const kind = computed(() => props.job?.kind ?? "download")
+const isDownload = computed(() => kind.value === "download")
+// The right-hand pane lists sources; a re-tag has none.
+const hasSide = computed(() => kind.value !== "retag")
+
+const subtitle = computed(() => {
+  if (kind.value === "retag") {
+    return props.job?.album.year
+      ? `${props.job.album.year} · re-writing tags`
+      : "re-writing tags"
+  }
+  // A card started job has no track count yet — "0 tracks" is worse than silence.
+  const n = props.job?.album.trackCount ?? 0
+  return [props.job?.album.year || "", n > 0 ? `${n} ${trackWord(n)}` : ""]
     .filter(Boolean)
-    .join(" · "),
-)
+    .join(" · ")
+})
 
 function toggleTracks(id: string) {
   const next = new Set(expanded.value)
@@ -197,7 +212,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
             <!-- probe budget toggle: a choice made when the job starts -->
             <div
-              v-if="!j.id"
+              v-if="!j.id && isDownload"
               class="hidden sm:flex items-center rounded-lg border border-white/10 overflow-hidden text-[11px] shrink-0"
             >
               <button
@@ -225,7 +240,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             </div>
 
             <span
-              v-else
+              v-else-if="isDownload"
               class="hidden sm:inline text-[11px] px-2.5 py-1 rounded-md bg-white/5 text-gray-400"
               title="Chosen when the download started"
             >
@@ -234,7 +249,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
             <button
               class="w-7 h-7 rounded-md text-gray-500 hover:text-white transition-colors flex items-center justify-center shrink-0"
-              title="Close (the download keeps running)"
+              :title="isDownload ? 'Close (the download keeps running)' : 'Close'"
               @click="emit('close')"
             >
               <Icon name="lucide:x" class="w-4 h-4" />
@@ -244,7 +259,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <!-- ── Body: log pane collapses, sources expand ───────────── -->
           <div
             class="flex-1 min-h-0 grid transition-[grid-template-columns] duration-300 ease-out"
-            :style="{ gridTemplateColumns: collapsed ? '0fr 1fr' : '1fr 320px' }"
+            :style="{
+              gridTemplateColumns: hasSide
+                ? collapsed
+                  ? '0fr 1fr'
+                  : '1fr 320px'
+                : '1fr 0fr',
+            }"
           >
             <!-- left: output -->
             <section class="min-w-0 overflow-hidden border-r border-white/5">

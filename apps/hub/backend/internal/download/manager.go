@@ -590,6 +590,7 @@ func (m *Manager) publish(
 
 	job.mu.Lock()
 	job.Phase = PhaseDone
+	job.Dir = destDir
 	job.Result = fmt.Sprintf("%d/%d tracks · %s", moved, total, humanBytes(bytes))
 	job.mu.Unlock()
 

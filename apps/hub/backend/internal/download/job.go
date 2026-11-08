@@ -92,6 +92,7 @@ type Progress struct {
 const (
 	PhaseWalking     = "walking"
 	PhaseDownloading = "downloading"
+	PhaseWorking     = "working" // retag: rewriting files, nothing is downloading
 	PhaseResults     = "results"
 	PhaseDone        = "done"
 	PhaseFailed      = "failed"
@@ -100,8 +101,18 @@ const (
 // JobView is the serializable state: exactly what the browser renders. It is a
 // plain value — no lock, safe to copy and to hand to JSON.
 type JobView struct {
-	ID         string       `json:"id"`
-	RGID       string       `json:"rg_id"`
+	ID   string `json:"id"`
+	RGID string `json:"rg_id"`
+
+	// Kind is what the job is doing: a download, a look at what a provider would
+	// give (inspect), or a rewrite of the tags of an album already on disk
+	// (retag). All three report through the same snapshot, which is why one modal
+	// can show any of them.
+	Kind string `json:"kind"`
+
+	// Dir is where the album ended up, published or retagged.
+	Dir string `json:"dir,omitempty"`
+
 	Phase      string       `json:"phase"`
 	Mode       string       `json:"mode"` // order | best
 	Album      AlbumView    `json:"album"`

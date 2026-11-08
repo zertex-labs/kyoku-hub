@@ -37,7 +37,13 @@ export const useDownloadStore = defineStore("download", () => {
       cover?: string;
       releaseId?: string;
     },
-    opts: { agentId?: string | null; provider?: string; albumId?: string; mode?: "order" | "best" } = {},
+    opts: {
+      agentId?: string | null;
+      provider?: string;
+      albumId?: string;
+      mode?: "order" | "best";
+      kind?: "download" | "inspect" | "retag";
+    } = {},
   ) {
     starting.value = true;
     error.value = null;
@@ -46,6 +52,7 @@ export const useDownloadStore = defineStore("download", () => {
     // visible effect even when the hub is slow, restarting, or missing the route.
     job.value = {
       album: album as Job["album"],
+      kind: opts.kind ?? "download",
       phase: "walking",
       mode: opts.mode ?? "order",
       sources: [],
@@ -62,6 +69,7 @@ export const useDownloadStore = defineStore("download", () => {
         credentials: "include",
         body: {
           rg_id: rgId,
+          kind: opts.kind ?? "download",
           album,
           agent_id: opts.agentId ?? undefined,
           provider: opts.provider,
@@ -72,7 +80,14 @@ export const useDownloadStore = defineStore("download", () => {
       job.value = data;
       open.value = true;
     } catch (e: any) {
-      const msg = e?.data?.error ?? e?.message ?? "could not start the download";
+      const msg =
+        e?.data?.error ??
+        e?.message ??
+        (opts.kind === "retag"
+          ? "could not re-tag this album"
+          : opts.kind === "inspect"
+            ? "could not check this album"
+            : "could not start the download");
       error.value = msg;
       // Keep the modal open so the failure is where the user is looking.
       const bogus = job.value;
@@ -80,14 +95,21 @@ export const useDownloadStore = defineStore("download", () => {
         ...(bogus as Job),
         phase: "failed",
         result: msg,
+        // The hint is only useful when the route itself is missing; a 409 from a
+        // handler that answered is a real answer, and dressing it up as a stale
+        // build sends the user looking in the wrong place.
         log: [
           ...(bogus?.log ?? []),
           { t: "--:--.-", level: "error", text: msg },
-          {
-            t: "--:--.-",
-            level: "warn",
-            text: "no job was created — if this is a restart, the hub may be running an older build",
-          },
+          ...(e?.status === 404
+            ? [
+                {
+                  t: "--:--.-",
+                  level: "warn" as const,
+                  text: "the hub has no such endpoint — it may be running an older build",
+                },
+              ]
+            : []),
         ],
       };
     } finally {

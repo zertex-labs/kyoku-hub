@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -223,7 +224,13 @@ func (h *DownloadHandler) Releases(c echo.Context) error {
 }
 
 type startJobRequest struct {
-	RGID    string             `json:"rg_id"`
+	RGID string `json:"rg_id"`
+
+	// Kind is "download" (default) or "inspect" — the latter probes what each
+	// source would deliver without fetching audio, which is what "check for a
+	// better copy" asks.
+	Kind string `json:"kind"`
+
 	Album   download.AlbumView `json:"album"`
 	AgentID string             `json:"agent_id"`
 	Mode    string             `json:"mode"`
@@ -243,7 +250,24 @@ func (h *DownloadHandler) StartJob(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "missing rg_id or album"})
 	}
 
-	job, err := h.jobs.Start(c.Request().Context(), user.ID, req.RGID, download.StartRequest{
+	// A re-tag works on what is on disk, and the hub only knows the directory for
+	// albums it published itself.
+	var dir string
+	if req.Kind == download.KindRetag {
+		// Where it was published, or — for a library that predates kyoku — where
+		// its files say it lives.
+		dir = h.releaseDir(c, user.ID, req.RGID)
+		if dir == "" {
+			dir = h.jobs.FindAlbumDir(req.RGID)
+		}
+		if dir == "" {
+			return c.JSON(http.StatusConflict, map[string]string{
+				"error": "this album is not on this machine, so there is nothing here to re-tag",
+			})
+		}
+	}
+
+	startReq := download.StartRequest{
 		Album:   req.Album,
 		AgentID: req.AgentID,
 		Mode:    req.Mode,
@@ -251,7 +275,19 @@ func (h *DownloadHandler) StartJob(c echo.Context) error {
 
 		PreferredProvider: req.PreferredProvider,
 		PreferredAlbumID:  req.PreferredAlbumID,
-	})
+	}
+
+	// One endpoint, three jobs: the modal shows a snapshot either way.
+	var job download.JobView
+	var err error
+	switch req.Kind {
+	case download.KindInspect:
+		job, err = h.jobs.StartInspect(c.Request().Context(), user.ID, req.RGID, startReq)
+	case download.KindRetag:
+		job, err = h.jobs.StartRetag(c.Request().Context(), user.ID, req.RGID, startReq, dir)
+	default:
+		job, err = h.jobs.Start(c.Request().Context(), user.ID, req.RGID, startReq)
+	}
 	if err != nil {
 		status := http.StatusBadRequest
 		if err.Error() == "no download sources configured" {
@@ -260,6 +296,23 @@ func (h *DownloadHandler) StartJob(c echo.Context) error {
 		return c.JSON(status, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusAccepted, job)
+}
+
+// releaseDir recovers where an album was published from the last stored job for
+// that release group.
+func (h *DownloadHandler) releaseDir(c echo.Context, userID, rgID string) string {
+	if h.queries == nil {
+		return ""
+	}
+	payload, err := h.queries.LatestJobPayload(c.Request().Context(), userID, rgID)
+	if err != nil || len(payload) == 0 {
+		return ""
+	}
+	var prev download.JobView
+	if err := json.Unmarshal(payload, &prev); err != nil {
+		return ""
+	}
+	return prev.Dir
 }
 
 func (h *DownloadHandler) ListJobs(c echo.Context) error {

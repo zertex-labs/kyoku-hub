@@ -82,6 +82,46 @@ const sortedTypes = computed(() =>
 // FS issues modal (the component fetches issue details on demand)
 const badModalRg = ref<ReleaseGroup | null>(null);
 
+// Per-card action menu. Rendered in a teleport at fixed coordinates: the card
+// clips its children (rounded cover), so a menu inside it gets cut off, and a
+// card's stacking context makes z-index unreliable against the next card.
+const menuRg = ref<ReleaseGroup | null>(null);
+const menuPos = ref({ x: 0, y: 0 });
+const downloads = useDownloadStore();
+
+function openMenuFor(rg: ReleaseGroup, event: MouseEvent) {
+  const card = (event.currentTarget as HTMLElement).closest(".group") as HTMLElement | null;
+  const rect = (card ?? (event.currentTarget as HTMLElement)).getBoundingClientRect();
+  menuPos.value = { x: rect.right, y: rect.top + 26 };
+  menuRg.value = menuRg.value?.mb_release_group_id === rg.mb_release_group_id ? null : rg;
+}
+
+function closeMenu() {
+  menuRg.value = null;
+}
+
+// An installed album can be looked at two ways: is there a better copy than the
+// one I have, and are the tags right. Both run as jobs, so both reuse the modal
+// the download page already uses.
+function checkQuality(rg: ReleaseGroup) {
+  closeMenu();
+  downloads.start(rg.mb_release_group_id, albumFor(rg), { kind: "inspect" });
+}
+
+function retag(rg: ReleaseGroup) {
+  closeMenu();
+  downloads.start(rg.mb_release_group_id, albumFor(rg), { kind: "retag" });
+}
+
+function albumFor(rg: ReleaseGroup) {
+  return {
+    title: rg.title,
+    artist: artist.value?.name ?? "",
+    year: rg.first_release_date?.slice(0, 4) ?? "",
+    trackCount: (rg as any).track_count ?? 0,
+  };
+}
+
 function downloadReleaseGroup(rg: ReleaseGroup) {
   navigateTo(
     `/download/rg/${rg.mb_release_group_id}?title=${encodeURIComponent(rg.title)}&artist=${encodeURIComponent(artist.value?.name ?? "")}`,
@@ -195,6 +235,21 @@ onUnmounted(() => {
             <div
               class="aspect-square bg-white/[0.03] flex items-center justify-center overflow-hidden relative"
             >
+              <!-- Actions for an album that is already on disk: fade in on hover. -->
+              <button
+                v-if="rg.fs_state && rg.fs_state !== 'MISSING'"
+                class="absolute top-1 right-1 z-10 w-5 h-4 rounded bg-black/70 backdrop-blur-sm border border-white/15 text-gray-300 hover:text-white hover:border-white/30 flex items-center justify-center transition-opacity"
+                :class="
+                  menuRg?.mb_release_group_id === rg.mb_release_group_id
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100'
+                "
+                title="Album actions"
+                @click.stop="openMenuFor(rg, $event)"
+              >
+                <Icon name="lucide:ellipsis" class="w-3 h-3" />
+              </button>
+
               <template v-if="!coverErrors.has(rg.mb_release_group_id)">
                 <div
                   v-if="!coverLoaded.has(rg.mb_release_group_id)"
@@ -229,40 +284,47 @@ onUnmounted(() => {
                   {{ rg.first_release_date?.slice(0, 4) || "—" }}
                 </p>
                 <div class="flex items-center gap-1">
-                  <!-- Download button: navigate to download page -->
-                  <template v-if="rg.fs_state === 'MISSING'">
-                    <button
-                      class="text-[10px] px-1 py-0.5 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-                      title="Download"
-                      @click.prevent="downloadReleaseGroup(rg)"
-                    >
-                      <Icon name="lucide:download" class="w-3 h-3" />
-                    </button>
-                  </template>
+                  <!-- Not in the library: one action, the download. -->
+                  <button
+                    v-if="!rg.fs_state || rg.fs_state === 'MISSING'"
+                    class="w-5 h-4 rounded bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors"
+                    title="Download"
+                    @click.prevent="downloadReleaseGroup(rg)"
+                  >
+                    <Icon name="lucide:download" class="w-3 h-3" />
+                  </button>
 
+                  <!-- On disk: the state, with the same 24px footprint so a row of
+                       cards does not read as a row of different-sized chips. -->
                   <component
                     :is="rg.fs_state === 'BAD' ? 'button' : 'span'"
-                    v-if="rg.fs_state"
-                    class="text-[10px] font-semibold px-1 py-0.5 rounded"
+                    v-else
+                    class="w-5 h-4 rounded flex items-center justify-center transition-colors"
                     :class="{
                       'bg-green-500/20 text-green-400': rg.fs_state === 'PERFECT',
                       'bg-yellow-500/20 text-yellow-400': rg.fs_state === 'MB_MISS',
                       'bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer':
                         rg.fs_state === 'BAD',
-                      'bg-white/5 text-gray-600': rg.fs_state === 'MISSING',
                     }"
-                    :title="rg.fs_state"
+                    :title="
+                      rg.fs_state === 'PERFECT'
+                        ? 'Complete'
+                        : rg.fs_state === 'BAD'
+                          ? 'Incomplete — click for details'
+                          : 'Missing tags'
+                    "
                     @click.prevent="rg.fs_state === 'BAD' && (badModalRg = rg)"
                   >
-                    {{
-                      rg.fs_state === "PERFECT"
-                        ? "✓"
-                        : rg.fs_state === "MB_MISS"
-                          ? "MB?"
-                          : rg.fs_state === "BAD"
-                            ? "!"
-                            : "–"
-                    }}
+                    <Icon
+                      :name="
+                        rg.fs_state === 'PERFECT'
+                          ? 'lucide:check'
+                          : rg.fs_state === 'MB_MISS'
+                            ? 'lucide:help-circle'
+                            : 'lucide:alert-circle'
+                      "
+                      class="w-3 h-3"
+                    />
                   </component>
                 </div>
               </div>
@@ -282,6 +344,45 @@ onUnmounted(() => {
       :name="artist.name"
       :description="description"
       @close="showBioModal = false"
+    />
+
+    <!-- Card actions, teleported: inside the card the rounded cover clips it and
+         the card's stacking context decides who paints on top. -->
+    <Teleport to="body">
+      <div
+        v-if="menuRg"
+        class="fixed inset-0 z-[70]"
+        @click="closeMenu"
+        @contextmenu.prevent="closeMenu"
+      />
+      <div
+        v-if="menuRg"
+        class="fixed z-[71] w-48 rounded-md border border-white/10 bg-[#17171b] shadow-xl py-1"
+        :style="{ left: `${menuPos.x}px`, top: `${menuPos.y}px`, transform: 'translateX(-100%)' }"
+        @click.stop
+      >
+        <button
+          class="w-full text-left px-2.5 py-1.5 text-[11px] text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
+          @click="checkQuality(menuRg)"
+        >
+          Check for better quality
+        </button>
+        <button
+          class="w-full text-left px-2.5 py-1.5 text-[11px] text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
+          @click="retag(menuRg)"
+        >
+          Re-tag from MusicBrainz
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- The same modal the download page uses: an inspect or a re-tag started
+         from a card reports here, with its log and its sources. -->
+    <DownloadJobModal
+      :open="downloads.open"
+      :job="downloads.job"
+      @close="downloads.close()"
+      @decide="downloads.decide"
     />
 
     <!-- BAD Tags Modal -->

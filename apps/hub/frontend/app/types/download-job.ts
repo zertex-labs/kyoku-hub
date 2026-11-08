@@ -67,7 +67,7 @@ export interface Decision {
   options: DecisionOption[]
 }
 
-export type JobPhase = 'walking' | 'downloading' | 'results' | 'done' | 'failed'
+export type JobPhase = 'walking' | 'downloading' | 'working' | 'results' | 'done' | 'failed'
 
 export interface JobAlbum {
   title: string
@@ -83,6 +83,10 @@ export interface Job {
   /** Present on real server jobs; absent on the mock harness. */
   id?: string
   rg_id?: string
+  /** What the job does. Absent means a download (the original kind). */
+  kind?: JobKind
+  /** Where the album sits on disk, once published or re-tagged. */
+  dir?: string
   album: JobAlbum
   phase: JobPhase
   mode: 'best' | 'order'
