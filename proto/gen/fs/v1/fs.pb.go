@@ -32,6 +32,9 @@ type Envelope struct {
 	//	*Envelope_ChallengeResponse
 	//	*Envelope_SyncRequest
 	//	*Envelope_ScanResult
+	//	*Envelope_WriteAlbum
+	//	*Envelope_WriteEvent
+	//	*Envelope_CancelWrite
 	Payload       isEnvelope_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -119,6 +122,33 @@ func (x *Envelope) GetScanResult() *ScanResult {
 	return nil
 }
 
+func (x *Envelope) GetWriteAlbum() *WriteAlbum {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_WriteAlbum); ok {
+			return x.WriteAlbum
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetWriteEvent() *WriteEvent {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_WriteEvent); ok {
+			return x.WriteEvent
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetCancelWrite() *CancelWrite {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_CancelWrite); ok {
+			return x.CancelWrite
+		}
+	}
+	return nil
+}
+
 type isEnvelope_Payload interface {
 	isEnvelope_Payload()
 }
@@ -147,6 +177,21 @@ type Envelope_ScanResult struct {
 	ScanResult *ScanResult `protobuf:"bytes,5,opt,name=scan_result,json=scanResult,proto3,oneof"`
 }
 
+type Envelope_WriteAlbum struct {
+	// A job the agent performs on the user's disk (hub -> fs)
+	WriteAlbum *WriteAlbum `protobuf:"bytes,6,opt,name=write_album,json=writeAlbum,proto3,oneof"`
+}
+
+type Envelope_WriteEvent struct {
+	// Progress and log lines from that job (fs -> hub)
+	WriteEvent *WriteEvent `protobuf:"bytes,7,opt,name=write_event,json=writeEvent,proto3,oneof"`
+}
+
+type Envelope_CancelWrite struct {
+	// The agent asks the hub to stop a job it is running (hub -> fs)
+	CancelWrite *CancelWrite `protobuf:"bytes,8,opt,name=cancel_write,json=cancelWrite,proto3,oneof"`
+}
+
 func (*Envelope_Challenge) isEnvelope_Payload() {}
 
 func (*Envelope_AuthResult) isEnvelope_Payload() {}
@@ -156,6 +201,475 @@ func (*Envelope_ChallengeResponse) isEnvelope_Payload() {}
 func (*Envelope_SyncRequest) isEnvelope_Payload() {}
 
 func (*Envelope_ScanResult) isEnvelope_Payload() {}
+
+func (*Envelope_WriteAlbum) isEnvelope_Payload() {}
+
+func (*Envelope_WriteEvent) isEnvelope_Payload() {}
+
+func (*Envelope_CancelWrite) isEnvelope_Payload() {}
+
+// The hub decides what an album should look like; the agent makes it so.
+//
+// The split is deliberate: the hub holds the provider credentials and resolves
+// MusicBrainz, the agent holds the files. Nothing here is provider-specific —
+// the agent is told "these bytes, from this URL, with these tags", never that a
+// service called Deezer exists.
+type WriteAlbum struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// "download" when the audio still has to be fetched, "retag" when the files
+	// are already where dest_rel points.
+	Kind        string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	AlbumTitle  string `protobuf:"bytes,3,opt,name=album_title,json=albumTitle,proto3" json:"album_title,omitempty"`
+	AlbumArtist string `protobuf:"bytes,4,opt,name=album_artist,json=albumArtist,proto3" json:"album_artist,omitempty"`
+	// Absolute paths on the agent's own filesystem.
+	StagingDir string `protobuf:"bytes,5,opt,name=staging_dir,json=stagingDir,proto3" json:"staging_dir,omitempty"`
+	LibraryDir string `protobuf:"bytes,6,opt,name=library_dir,json=libraryDir,proto3" json:"library_dir,omitempty"`
+	// Front cover, already fetched by the hub and sized once for the whole album.
+	Cover          []byte        `protobuf:"bytes,7,opt,name=cover,proto3" json:"cover,omitempty"`
+	EmbedCover     bool          `protobuf:"varint,8,opt,name=embed_cover,json=embedCover,proto3" json:"embed_cover,omitempty"`
+	WriteCoverFile bool          `protobuf:"varint,9,opt,name=write_cover_file,json=writeCoverFile,proto3" json:"write_cover_file,omitempty"`
+	Tracks         []*WriteTrack `protobuf:"bytes,10,rep,name=tracks,proto3" json:"tracks,omitempty"`
+	// Run the agent's installed plugins on these hooks before publishing.
+	Hooks []string `protobuf:"bytes,11,rep,name=hooks,proto3" json:"hooks,omitempty"`
+	// Ask for a library scan when the batch lands, so the hub's view updates
+	// without waiting for the next poll.
+	ScanAfter     bool `protobuf:"varint,12,opt,name=scan_after,json=scanAfter,proto3" json:"scan_after,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteAlbum) Reset() {
+	*x = WriteAlbum{}
+	mi := &file_fs_v1_fs_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteAlbum) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteAlbum) ProtoMessage() {}
+
+func (x *WriteAlbum) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteAlbum.ProtoReflect.Descriptor instead.
+func (*WriteAlbum) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *WriteAlbum) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *WriteAlbum) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *WriteAlbum) GetAlbumTitle() string {
+	if x != nil {
+		return x.AlbumTitle
+	}
+	return ""
+}
+
+func (x *WriteAlbum) GetAlbumArtist() string {
+	if x != nil {
+		return x.AlbumArtist
+	}
+	return ""
+}
+
+func (x *WriteAlbum) GetStagingDir() string {
+	if x != nil {
+		return x.StagingDir
+	}
+	return ""
+}
+
+func (x *WriteAlbum) GetLibraryDir() string {
+	if x != nil {
+		return x.LibraryDir
+	}
+	return ""
+}
+
+func (x *WriteAlbum) GetCover() []byte {
+	if x != nil {
+		return x.Cover
+	}
+	return nil
+}
+
+func (x *WriteAlbum) GetEmbedCover() bool {
+	if x != nil {
+		return x.EmbedCover
+	}
+	return false
+}
+
+func (x *WriteAlbum) GetWriteCoverFile() bool {
+	if x != nil {
+		return x.WriteCoverFile
+	}
+	return false
+}
+
+func (x *WriteAlbum) GetTracks() []*WriteTrack {
+	if x != nil {
+		return x.Tracks
+	}
+	return nil
+}
+
+func (x *WriteAlbum) GetHooks() []string {
+	if x != nil {
+		return x.Hooks
+	}
+	return nil
+}
+
+func (x *WriteAlbum) GetScanAfter() bool {
+	if x != nil {
+		return x.ScanAfter
+	}
+	return false
+}
+
+type WriteTrack struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Path of the file inside library_dir, e.g. "01 - Nukegara.flac". For a retag
+	// this is the file to rewrite in place.
+	DestRel string `protobuf:"bytes,1,opt,name=dest_rel,json=destRel,proto3" json:"dest_rel,omitempty"`
+	// Where the audio comes from. Empty for a retag.
+	Url     string            `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	Headers map[string]string `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Track   int32             `protobuf:"varint,4,opt,name=track,proto3" json:"track,omitempty"`
+	Disc    int32             `protobuf:"varint,5,opt,name=disc,proto3" json:"disc,omitempty"`
+	// The tags to write, in the order they should appear. Keys are canonical
+	// (Picard's names); the agent maps them onto the container's frames.
+	Tags []*Tag `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
+	// What the hub expects to arrive, so the agent can fail early instead of
+	// tagging a truncated file.
+	ExpectedExt   string `protobuf:"bytes,7,opt,name=expected_ext,json=expectedExt,proto3" json:"expected_ext,omitempty"`
+	ExpectedBytes int64  `protobuf:"varint,8,opt,name=expected_bytes,json=expectedBytes,proto3" json:"expected_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteTrack) Reset() {
+	*x = WriteTrack{}
+	mi := &file_fs_v1_fs_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteTrack) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteTrack) ProtoMessage() {}
+
+func (x *WriteTrack) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteTrack.ProtoReflect.Descriptor instead.
+func (*WriteTrack) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *WriteTrack) GetDestRel() string {
+	if x != nil {
+		return x.DestRel
+	}
+	return ""
+}
+
+func (x *WriteTrack) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *WriteTrack) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *WriteTrack) GetTrack() int32 {
+	if x != nil {
+		return x.Track
+	}
+	return 0
+}
+
+func (x *WriteTrack) GetDisc() int32 {
+	if x != nil {
+		return x.Disc
+	}
+	return 0
+}
+
+func (x *WriteTrack) GetTags() []*Tag {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *WriteTrack) GetExpectedExt() string {
+	if x != nil {
+		return x.ExpectedExt
+	}
+	return ""
+}
+
+func (x *WriteTrack) GetExpectedBytes() int64 {
+	if x != nil {
+		return x.ExpectedBytes
+	}
+	return 0
+}
+
+// A tag and its values: multi-valued (genres, artists) and ordered, because a
+// map would lose both.
+type Tag struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Values        []string               `protobuf:"bytes,2,rep,name=values,proto3" json:"values,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Tag) Reset() {
+	*x = Tag{}
+	mi := &file_fs_v1_fs_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Tag) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Tag) ProtoMessage() {}
+
+func (x *Tag) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Tag.ProtoReflect.Descriptor instead.
+func (*Tag) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Tag) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *Tag) GetValues() []string {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+// Progress, logs and the final word on a write job.
+type WriteEvent struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// queued | downloading | tagging | publishing | verifying | done | failed
+	Phase string `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
+	Done  int32  `protobuf:"varint,3,opt,name=done,proto3" json:"done,omitempty"`
+	Total int32  `protobuf:"varint,4,opt,name=total,proto3" json:"total,omitempty"`
+	// One line for the job log. Level is "info", "warn" or "error".
+	Message string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	Level   string `protobuf:"bytes,6,opt,name=level,proto3" json:"level,omitempty"`
+	// Set on the final event.
+	Result string `protobuf:"bytes,7,opt,name=result,proto3" json:"result,omitempty"`
+	Error  string `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
+	// Where the album ended up, for the hub to remember.
+	Dir           string `protobuf:"bytes,9,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteEvent) Reset() {
+	*x = WriteEvent{}
+	mi := &file_fs_v1_fs_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteEvent) ProtoMessage() {}
+
+func (x *WriteEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteEvent.ProtoReflect.Descriptor instead.
+func (*WriteEvent) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WriteEvent) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *WriteEvent) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *WriteEvent) GetDone() int32 {
+	if x != nil {
+		return x.Done
+	}
+	return 0
+}
+
+func (x *WriteEvent) GetTotal() int32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *WriteEvent) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *WriteEvent) GetLevel() string {
+	if x != nil {
+		return x.Level
+	}
+	return ""
+}
+
+func (x *WriteEvent) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+func (x *WriteEvent) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *WriteEvent) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+type CancelWrite struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelWrite) Reset() {
+	*x = CancelWrite{}
+	mi := &file_fs_v1_fs_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelWrite) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelWrite) ProtoMessage() {}
+
+func (x *CancelWrite) ProtoReflect() protoreflect.Message {
+	mi := &file_fs_v1_fs_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelWrite.ProtoReflect.Descriptor instead.
+func (*CancelWrite) Descriptor() ([]byte, []int) {
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CancelWrite) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
 
 // Hub -> Fs: challenge with random nonce for keypair auth
 type Challenge struct {
@@ -167,7 +681,7 @@ type Challenge struct {
 
 func (x *Challenge) Reset() {
 	*x = Challenge{}
-	mi := &file_fs_v1_fs_proto_msgTypes[1]
+	mi := &file_fs_v1_fs_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -179,7 +693,7 @@ func (x *Challenge) String() string {
 func (*Challenge) ProtoMessage() {}
 
 func (x *Challenge) ProtoReflect() protoreflect.Message {
-	mi := &file_fs_v1_fs_proto_msgTypes[1]
+	mi := &file_fs_v1_fs_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -192,7 +706,7 @@ func (x *Challenge) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Challenge.ProtoReflect.Descriptor instead.
 func (*Challenge) Descriptor() ([]byte, []int) {
-	return file_fs_v1_fs_proto_rawDescGZIP(), []int{1}
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Challenge) GetNonce() []byte {
@@ -212,7 +726,7 @@ type ChallengeResponse struct {
 
 func (x *ChallengeResponse) Reset() {
 	*x = ChallengeResponse{}
-	mi := &file_fs_v1_fs_proto_msgTypes[2]
+	mi := &file_fs_v1_fs_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -224,7 +738,7 @@ func (x *ChallengeResponse) String() string {
 func (*ChallengeResponse) ProtoMessage() {}
 
 func (x *ChallengeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fs_v1_fs_proto_msgTypes[2]
+	mi := &file_fs_v1_fs_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -237,7 +751,7 @@ func (x *ChallengeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChallengeResponse.ProtoReflect.Descriptor instead.
 func (*ChallengeResponse) Descriptor() ([]byte, []int) {
-	return file_fs_v1_fs_proto_rawDescGZIP(), []int{2}
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ChallengeResponse) GetSignature() []byte {
@@ -258,7 +772,7 @@ type AuthResult struct {
 
 func (x *AuthResult) Reset() {
 	*x = AuthResult{}
-	mi := &file_fs_v1_fs_proto_msgTypes[3]
+	mi := &file_fs_v1_fs_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -270,7 +784,7 @@ func (x *AuthResult) String() string {
 func (*AuthResult) ProtoMessage() {}
 
 func (x *AuthResult) ProtoReflect() protoreflect.Message {
-	mi := &file_fs_v1_fs_proto_msgTypes[3]
+	mi := &file_fs_v1_fs_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -283,7 +797,7 @@ func (x *AuthResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthResult.ProtoReflect.Descriptor instead.
 func (*AuthResult) Descriptor() ([]byte, []int) {
-	return file_fs_v1_fs_proto_rawDescGZIP(), []int{3}
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AuthResult) GetSuccess() bool {
@@ -310,7 +824,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_fs_v1_fs_proto_msgTypes[4]
+	mi := &file_fs_v1_fs_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +836,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fs_v1_fs_proto_msgTypes[4]
+	mi := &file_fs_v1_fs_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +849,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_fs_v1_fs_proto_rawDescGZIP(), []int{4}
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SyncRequest) GetFull() bool {
@@ -368,7 +882,7 @@ type TrackEntry struct {
 
 func (x *TrackEntry) Reset() {
 	*x = TrackEntry{}
-	mi := &file_fs_v1_fs_proto_msgTypes[5]
+	mi := &file_fs_v1_fs_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -380,7 +894,7 @@ func (x *TrackEntry) String() string {
 func (*TrackEntry) ProtoMessage() {}
 
 func (x *TrackEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_fs_v1_fs_proto_msgTypes[5]
+	mi := &file_fs_v1_fs_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -393,7 +907,7 @@ func (x *TrackEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrackEntry.ProtoReflect.Descriptor instead.
 func (*TrackEntry) Descriptor() ([]byte, []int) {
-	return file_fs_v1_fs_proto_rawDescGZIP(), []int{5}
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *TrackEntry) GetRpath() string {
@@ -483,7 +997,7 @@ type ScanResult struct {
 
 func (x *ScanResult) Reset() {
 	*x = ScanResult{}
-	mi := &file_fs_v1_fs_proto_msgTypes[6]
+	mi := &file_fs_v1_fs_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -495,7 +1009,7 @@ func (x *ScanResult) String() string {
 func (*ScanResult) ProtoMessage() {}
 
 func (x *ScanResult) ProtoReflect() protoreflect.Message {
-	mi := &file_fs_v1_fs_proto_msgTypes[6]
+	mi := &file_fs_v1_fs_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -508,7 +1022,7 @@ func (x *ScanResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanResult.ProtoReflect.Descriptor instead.
 func (*ScanResult) Descriptor() ([]byte, []int) {
-	return file_fs_v1_fs_proto_rawDescGZIP(), []int{6}
+	return file_fs_v1_fs_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ScanResult) GetTracks() []*TrackEntry {
@@ -522,7 +1036,7 @@ var File_fs_v1_fs_proto protoreflect.FileDescriptor
 
 const file_fs_v1_fs_proto_rawDesc = "" +
 	"\n" +
-	"\x0efs/v1/fs.proto\x12\x05fs.v1\"\xb7\x02\n" +
+	"\x0efs/v1/fs.proto\x12\x05fs.v1\"\xdc\x03\n" +
 	"\bEnvelope\x120\n" +
 	"\tchallenge\x18\x01 \x01(\v2\x10.fs.v1.ChallengeH\x00R\tchallenge\x124\n" +
 	"\vauth_result\x18\x02 \x01(\v2\x11.fs.v1.AuthResultH\x00R\n" +
@@ -530,8 +1044,63 @@ const file_fs_v1_fs_proto_rawDesc = "" +
 	"\x12challenge_response\x18\x03 \x01(\v2\x18.fs.v1.ChallengeResponseH\x00R\x11challengeResponse\x127\n" +
 	"\fsync_request\x18\x04 \x01(\v2\x12.fs.v1.SyncRequestH\x00R\vsyncRequest\x124\n" +
 	"\vscan_result\x18\x05 \x01(\v2\x11.fs.v1.ScanResultH\x00R\n" +
-	"scanResultB\t\n" +
-	"\apayload\"!\n" +
+	"scanResult\x124\n" +
+	"\vwrite_album\x18\x06 \x01(\v2\x11.fs.v1.WriteAlbumH\x00R\n" +
+	"writeAlbum\x124\n" +
+	"\vwrite_event\x18\a \x01(\v2\x11.fs.v1.WriteEventH\x00R\n" +
+	"writeEvent\x127\n" +
+	"\fcancel_write\x18\b \x01(\v2\x12.fs.v1.CancelWriteH\x00R\vcancelWriteB\t\n" +
+	"\apayload\"\xfe\x02\n" +
+	"\n" +
+	"WriteAlbum\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x1f\n" +
+	"\valbum_title\x18\x03 \x01(\tR\n" +
+	"albumTitle\x12!\n" +
+	"\falbum_artist\x18\x04 \x01(\tR\valbumArtist\x12\x1f\n" +
+	"\vstaging_dir\x18\x05 \x01(\tR\n" +
+	"stagingDir\x12\x1f\n" +
+	"\vlibrary_dir\x18\x06 \x01(\tR\n" +
+	"libraryDir\x12\x14\n" +
+	"\x05cover\x18\a \x01(\fR\x05cover\x12\x1f\n" +
+	"\vembed_cover\x18\b \x01(\bR\n" +
+	"embedCover\x12(\n" +
+	"\x10write_cover_file\x18\t \x01(\bR\x0ewriteCoverFile\x12)\n" +
+	"\x06tracks\x18\n" +
+	" \x03(\v2\x11.fs.v1.WriteTrackR\x06tracks\x12\x14\n" +
+	"\x05hooks\x18\v \x03(\tR\x05hooks\x12\x1d\n" +
+	"\n" +
+	"scan_after\x18\f \x01(\bR\tscanAfter\"\xc3\x02\n" +
+	"\n" +
+	"WriteTrack\x12\x19\n" +
+	"\bdest_rel\x18\x01 \x01(\tR\adestRel\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x128\n" +
+	"\aheaders\x18\x03 \x03(\v2\x1e.fs.v1.WriteTrack.HeadersEntryR\aheaders\x12\x14\n" +
+	"\x05track\x18\x04 \x01(\x05R\x05track\x12\x12\n" +
+	"\x04disc\x18\x05 \x01(\x05R\x04disc\x12\x1e\n" +
+	"\x04tags\x18\x06 \x03(\v2\n" +
+	".fs.v1.TagR\x04tags\x12!\n" +
+	"\fexpected_ext\x18\a \x01(\tR\vexpectedExt\x12%\n" +
+	"\x0eexpected_bytes\x18\b \x01(\x03R\rexpectedBytes\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"/\n" +
+	"\x03Tag\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x16\n" +
+	"\x06values\x18\x02 \x03(\tR\x06values\"\xd3\x01\n" +
+	"\n" +
+	"WriteEvent\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x14\n" +
+	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x12\n" +
+	"\x04done\x18\x03 \x01(\x05R\x04done\x12\x14\n" +
+	"\x05total\x18\x04 \x01(\x05R\x05total\x12\x18\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\x12\x14\n" +
+	"\x05level\x18\x06 \x01(\tR\x05level\x12\x16\n" +
+	"\x06result\x18\a \x01(\tR\x06result\x12\x14\n" +
+	"\x05error\x18\b \x01(\tR\x05error\x12\x10\n" +
+	"\x03dir\x18\t \x01(\tR\x03dir\"$\n" +
+	"\vCancelWrite\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"!\n" +
 	"\tChallenge\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\fR\x05nonce\"1\n" +
 	"\x11ChallengeResponse\x12\x1c\n" +
@@ -572,28 +1141,40 @@ func file_fs_v1_fs_proto_rawDescGZIP() []byte {
 	return file_fs_v1_fs_proto_rawDescData
 }
 
-var file_fs_v1_fs_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_fs_v1_fs_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_fs_v1_fs_proto_goTypes = []any{
 	(*Envelope)(nil),          // 0: fs.v1.Envelope
-	(*Challenge)(nil),         // 1: fs.v1.Challenge
-	(*ChallengeResponse)(nil), // 2: fs.v1.ChallengeResponse
-	(*AuthResult)(nil),        // 3: fs.v1.AuthResult
-	(*SyncRequest)(nil),       // 4: fs.v1.SyncRequest
-	(*TrackEntry)(nil),        // 5: fs.v1.TrackEntry
-	(*ScanResult)(nil),        // 6: fs.v1.ScanResult
+	(*WriteAlbum)(nil),        // 1: fs.v1.WriteAlbum
+	(*WriteTrack)(nil),        // 2: fs.v1.WriteTrack
+	(*Tag)(nil),               // 3: fs.v1.Tag
+	(*WriteEvent)(nil),        // 4: fs.v1.WriteEvent
+	(*CancelWrite)(nil),       // 5: fs.v1.CancelWrite
+	(*Challenge)(nil),         // 6: fs.v1.Challenge
+	(*ChallengeResponse)(nil), // 7: fs.v1.ChallengeResponse
+	(*AuthResult)(nil),        // 8: fs.v1.AuthResult
+	(*SyncRequest)(nil),       // 9: fs.v1.SyncRequest
+	(*TrackEntry)(nil),        // 10: fs.v1.TrackEntry
+	(*ScanResult)(nil),        // 11: fs.v1.ScanResult
+	nil,                       // 12: fs.v1.WriteTrack.HeadersEntry
 }
 var file_fs_v1_fs_proto_depIdxs = []int32{
-	1, // 0: fs.v1.Envelope.challenge:type_name -> fs.v1.Challenge
-	3, // 1: fs.v1.Envelope.auth_result:type_name -> fs.v1.AuthResult
-	2, // 2: fs.v1.Envelope.challenge_response:type_name -> fs.v1.ChallengeResponse
-	4, // 3: fs.v1.Envelope.sync_request:type_name -> fs.v1.SyncRequest
-	6, // 4: fs.v1.Envelope.scan_result:type_name -> fs.v1.ScanResult
-	5, // 5: fs.v1.ScanResult.tracks:type_name -> fs.v1.TrackEntry
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6,  // 0: fs.v1.Envelope.challenge:type_name -> fs.v1.Challenge
+	8,  // 1: fs.v1.Envelope.auth_result:type_name -> fs.v1.AuthResult
+	7,  // 2: fs.v1.Envelope.challenge_response:type_name -> fs.v1.ChallengeResponse
+	9,  // 3: fs.v1.Envelope.sync_request:type_name -> fs.v1.SyncRequest
+	11, // 4: fs.v1.Envelope.scan_result:type_name -> fs.v1.ScanResult
+	1,  // 5: fs.v1.Envelope.write_album:type_name -> fs.v1.WriteAlbum
+	4,  // 6: fs.v1.Envelope.write_event:type_name -> fs.v1.WriteEvent
+	5,  // 7: fs.v1.Envelope.cancel_write:type_name -> fs.v1.CancelWrite
+	2,  // 8: fs.v1.WriteAlbum.tracks:type_name -> fs.v1.WriteTrack
+	12, // 9: fs.v1.WriteTrack.headers:type_name -> fs.v1.WriteTrack.HeadersEntry
+	3,  // 10: fs.v1.WriteTrack.tags:type_name -> fs.v1.Tag
+	10, // 11: fs.v1.ScanResult.tracks:type_name -> fs.v1.TrackEntry
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_fs_v1_fs_proto_init() }
@@ -607,6 +1188,9 @@ func file_fs_v1_fs_proto_init() {
 		(*Envelope_ChallengeResponse)(nil),
 		(*Envelope_SyncRequest)(nil),
 		(*Envelope_ScanResult)(nil),
+		(*Envelope_WriteAlbum)(nil),
+		(*Envelope_WriteEvent)(nil),
+		(*Envelope_CancelWrite)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -614,7 +1198,7 @@ func file_fs_v1_fs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fs_v1_fs_proto_rawDesc), len(file_fs_v1_fs_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

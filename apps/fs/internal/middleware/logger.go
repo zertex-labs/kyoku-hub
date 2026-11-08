@@ -46,4 +46,3 @@ func ZapLogger(log *zap.Logger) echo.MiddlewareFunc {
 		}
 	}
 }
-

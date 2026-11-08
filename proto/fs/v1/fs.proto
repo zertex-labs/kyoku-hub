@@ -20,7 +20,105 @@ message Envelope {
 
     // Sync (fs -> hub)
     ScanResult scan_result = 5;
+
+    // A job the agent performs on the user's disk (hub -> fs)
+    WriteAlbum write_album = 6;
+
+    // Progress and log lines from that job (fs -> hub)
+    WriteEvent write_event = 7;
+
+    // The agent asks the hub to stop a job it is running (hub -> fs)
+    CancelWrite cancel_write = 8;
   }
+}
+
+// The hub decides what an album should look like; the agent makes it so.
+//
+// The split is deliberate: the hub holds the provider credentials and resolves
+// MusicBrainz, the agent holds the files. Nothing here is provider-specific —
+// the agent is told "these bytes, from this URL, with these tags", never that a
+// service called Deezer exists.
+message WriteAlbum {
+  string job_id = 1;
+  // "download" when the audio still has to be fetched, "retag" when the files
+  // are already where dest_rel points.
+  string kind = 2;
+
+  string album_title = 3;
+  string album_artist = 4;
+
+  // Absolute paths on the agent's own filesystem.
+  string staging_dir = 5;
+  string library_dir = 6;
+
+  // Front cover, already fetched by the hub and sized once for the whole album.
+  bytes cover = 7;
+  bool embed_cover = 8;
+  bool write_cover_file = 9;
+
+  repeated WriteTrack tracks = 10;
+
+  // Run the agent's installed plugins on these hooks before publishing.
+  repeated string hooks = 11;
+
+  // Ask for a library scan when the batch lands, so the hub's view updates
+  // without waiting for the next poll.
+  bool scan_after = 12;
+}
+
+message WriteTrack {
+  // Path of the file inside library_dir, e.g. "01 - Nukegara.flac". For a retag
+  // this is the file to rewrite in place.
+  string dest_rel = 1;
+
+  // Where the audio comes from. Empty for a retag.
+  string url = 2;
+  map<string, string> headers = 3;
+
+  int32 track = 4;
+  int32 disc = 5;
+
+  // The tags to write, in the order they should appear. Keys are canonical
+  // (Picard's names); the agent maps them onto the container's frames.
+  repeated Tag tags = 6;
+
+  // What the hub expects to arrive, so the agent can fail early instead of
+  // tagging a truncated file.
+  string expected_ext = 7;
+  int64 expected_bytes = 8;
+}
+
+// A tag and its values: multi-valued (genres, artists) and ordered, because a
+// map would lose both.
+message Tag {
+  string key = 1;
+  repeated string values = 2;
+}
+
+// Progress, logs and the final word on a write job.
+message WriteEvent {
+  string job_id = 1;
+
+  // queued | downloading | tagging | publishing | verifying | done | failed
+  string phase = 2;
+
+  int32 done = 3;
+  int32 total = 4;
+
+  // One line for the job log. Level is "info", "warn" or "error".
+  string message = 5;
+  string level = 6;
+
+  // Set on the final event.
+  string result = 7;
+  string error = 8;
+
+  // Where the album ended up, for the hub to remember.
+  string dir = 9;
+}
+
+message CancelWrite {
+  string job_id = 1;
 }
 
 // Hub -> Fs: challenge with random nonce for keypair auth

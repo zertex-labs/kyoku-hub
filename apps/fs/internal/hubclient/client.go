@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/handler"
+	"github.com/zertex-labs/kyoku-hub/apps/fs/internal/writer"
 	fspb "github.com/zertex-labs/kyoku-hub/proto/gen/fs/v1"
 )
 
@@ -41,6 +42,11 @@ type Client struct {
 	mu   sync.Mutex
 
 	scanMu sync.Mutex // serializes scans triggered by sync requests
+
+	// writeMu serializes write jobs: they are large sequential writes to the
+	// user's disk, and two albums at once only makes the progress meaningless.
+	writeMu  sync.Mutex
+	executor *writer.Executor
 }
 
 func NewClient(hubWSURL, agentID string, privateKey ed25519.PrivateKey, fsHandler *handler.FsHandler, logger *zap.Logger) *Client {
@@ -239,9 +245,47 @@ func (c *Client) handleMessage(ctx context.Context, env *fspb.Envelope) {
 	switch p := env.Payload.(type) {
 	case *fspb.Envelope_SyncRequest:
 		go c.handleSyncRequest(p.SyncRequest)
+	case *fspb.Envelope_WriteAlbum:
+		go c.handleWriteAlbum(p.WriteAlbum)
 	default:
 		c.logger.Debug("received unhandled message from hub")
 	}
+}
+
+// handleWriteAlbum performs a job the hub cannot: the hub has no access to this
+// disk. Every step reports back as a WriteEvent, including failure, so the hub
+// never has to infer an outcome from silence.
+func (c *Client) handleWriteAlbum(album *fspb.WriteAlbum) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	if c.executor == nil {
+		c.executor = writer.New()
+	}
+	if album == nil {
+		return
+	}
+	c.logger.Info("write job received",
+		zap.String("job_id", album.GetJobId()),
+		zap.String("kind", album.GetKind()),
+		zap.Int("tracks", len(album.GetTracks())),
+	)
+
+	err := c.executor.Run(context.Background(), album, func(ev *fspb.WriteEvent) {
+		if sendErr := c.send(&fspb.Envelope{
+			Payload: &fspb.Envelope_WriteEvent{WriteEvent: ev},
+		}); sendErr != nil {
+			c.logger.Warn("failed to send write event", zap.Error(sendErr))
+		}
+	})
+	if err != nil {
+		c.logger.Warn("write job failed", zap.String("job_id", album.GetJobId()), zap.Error(err))
+		return
+	}
+
+	// The verdict changed: tell the hub to re-read this library, which is what
+	// keeps the album grid honest after a download or a re-tag.
+	go c.handleSyncRequest(&fspb.SyncRequest{Full: false})
 }
 
 func (c *Client) handleSyncRequest(req *fspb.SyncRequest) {
@@ -269,17 +313,17 @@ func (c *Client) handleSyncRequest(req *fspb.SyncRequest) {
 	for _, files := range dirs {
 		for _, f := range files {
 			tracks = append(tracks, &fspb.TrackEntry{
-				Rpath:                      f.RelativePath,
-				Title:                      f.MusicTags.Title,
-				Album:                      f.MusicTags.Album,
-				Artist:                     f.MusicTags.Artist,
-				Year:                       int32(f.MusicTags.Year),
-				TrackNum:                   int32(f.MusicTags.TrackNum),
-				MusicbrainzReleaseGroupId:  f.MusicTags.MusicBrainzReleaseGroupID,
-				MusicbrainzArtistId:        f.MusicTags.MusicBrainzArtistID,
-				MusicbrainzReleaseId:       f.MusicTags.MusicBrainzReleaseID,
-				MusicbrainzTrackId:         f.MusicTags.MusicBrainzRecordingID,
-				Isrc:                       f.MusicTags.ISRC,
+				Rpath:                     f.RelativePath,
+				Title:                     f.MusicTags.Title,
+				Album:                     f.MusicTags.Album,
+				Artist:                    f.MusicTags.Artist,
+				Year:                      int32(f.MusicTags.Year),
+				TrackNum:                  int32(f.MusicTags.TrackNum),
+				MusicbrainzReleaseGroupId: f.MusicTags.MusicBrainzReleaseGroupID,
+				MusicbrainzArtistId:       f.MusicTags.MusicBrainzArtistID,
+				MusicbrainzReleaseId:      f.MusicTags.MusicBrainzReleaseID,
+				MusicbrainzTrackId:        f.MusicTags.MusicBrainzRecordingID,
+				Isrc:                      f.MusicTags.ISRC,
 			})
 		}
 	}
