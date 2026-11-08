@@ -251,21 +251,38 @@ func (m *Manager) resolveMB(ctx context.Context, rgid, releaseID string, cand do
 }
 
 // pickRelease returns a release id only when the choice is unambiguous.
+// pickRelease chooses the edition the tags should name.
+//
+// Staying silent when several editions match sounds cautious and is worse in
+// practice: an album with nine editions then gets no MUSICBRAINZ_ALBUMID at all,
+// and every file stays half-identified. The edition that comes first — exact
+// track count, then the earliest release date — is the original, which is the one
+// whose identifiers other tools will recognise.
 func pickRelease(releases []mbRelease, tracks int) string {
-	match := ""
+	if tracks > 0 {
+		if id := earliestRelease(releases, func(n int) bool { return n == tracks }); id != "" {
+			return id
+		}
+	}
+	// A folder that is missing a track still belongs to the edition that contains
+	// every file it does have.
+	return earliestRelease(releases, func(n int) bool { return tracks == 0 || n >= tracks })
+}
+
+func earliestRelease(releases []mbRelease, ok func(int) bool) string {
+	best, bestDate := "", ""
 	for _, r := range releases {
-		if tracks > 0 && releaseTrackCount(r) != tracks {
+		if !ok(releaseTrackCount(r)) {
 			continue
 		}
 		if strings.EqualFold(r.Status, "Pseudo-Release") || strings.EqualFold(r.Status, "Bootleg") {
 			continue
 		}
-		if match != "" {
-			return "" // more than one candidate: stay silent
+		if best == "" || (r.Date != "" && (bestDate == "" || r.Date < bestDate)) {
+			best, bestDate = r.ID, r.Date
 		}
-		match = r.ID
 	}
-	return match
+	return best
 }
 
 func releaseTrackCount(r mbRelease) int {

@@ -115,11 +115,12 @@ func (c *mbClient) store(path string, body []byte) {
 	c.cache[path] = mbCacheEntry{body: body, expires: time.Now().Add(mbCacheTTL)}
 }
 
-// fetch is the retry loop: three attempts, each waiting longer than the last, and
-// never faster than the current spacing.
+// fetch is the retry loop: four attempts at 1s, 4s and 9s, never faster than the
+// current spacing. A "server busy" from MusicBrainz is usually a minute of
+// congestion, not a permanent no — and giving up turns into missing tags.
 func (c *mbClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < 4; attempt++ {
 		if attempt > 0 {
 			wait := time.Duration(attempt*attempt) * time.Second
 			select {

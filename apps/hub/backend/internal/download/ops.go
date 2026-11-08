@@ -268,11 +268,15 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 		Artist: job.Album.Artist,
 		Tracks: make([]downloader.TrackQuality, 0, len(files)),
 	}
+	releaseTrackID := ""
 	for _, f := range files {
 		v, err := postprocess.ReadTags(f)
 		if err != nil {
 			job.log("warn", filepath.Base(f)+": "+err.Error())
 			continue
+		}
+		if releaseTrackID == "" && v.ReleaseTrackID != "" {
+			releaseTrackID = v.ReleaseTrackID
 		}
 		n := v.Track
 		if n == 0 {
@@ -291,6 +295,21 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 		return
 	}
 	job.log("info", plural(len(cand.Tracks), "file", "files")+" · resolving the release")
+
+	// The files usually know which release they came from, even when nothing else
+	// does. Asking for that track costs one request and saves the whole album:
+	// with the edition in hand, every recording id comes from its tracklist
+	// instead of one throttled lookup per track.
+	if job.Album.ReleaseID == "" && releaseTrackID != "" {
+		id, err := m.releaseOfTrack(ctx, releaseTrackID)
+		switch {
+		case err != nil:
+			job.log("warn", "the release named by the files could not be read ("+err.Error()+")")
+		case id != "":
+			job.Album.ReleaseID = id
+			job.log("info", "mb · the files name release "+id)
+		}
+	}
 
 	mb := m.resolveMB(ctx, job.RGID, job.Album.ReleaseID, cand)
 	cover := readCoverIfAny(dir, files)
@@ -341,6 +360,7 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 			Title: v.Title, Number: n, Disc: v.Disc, ISRC: v.ISRC, Known: true,
 		}
 		art := m.artifact(job, tq, cand, mb, f, filepath.Ext(f), cover)
+		keepKnownIDs(&art, v)
 		for _, o := range chain.Run(ctx, &art) {
 			if reason, skipped := o.Skipped(); skipped {
 				// One album, one reason: eleven identical lines made the log
@@ -363,6 +383,9 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 	job.Phase = PhaseDone
 	job.Progress = nil
 	job.Result = plural(done, "file retagged", "files retagged")
+	if f := mb.failures(); f != "" {
+		job.Result += " — MusicBrainz was " + f + ", so the ids were left alone"
+	}
 	job.mu.Unlock()
 	job.log("info", "Done.")
 	m.broadcast(job)
@@ -390,6 +413,47 @@ func audioFilesIn(dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// keepKnownIDs fills whatever the resolver could not answer from what the file
+// already says. MusicBrainz throttles by IP; a re-tag that hits a busy minute
+// must not blank the ids the file has carried since the day it was tagged.
+func keepKnownIDs(art *postprocess.Artifact, v postprocess.TagValues) {
+	art.MBTrackID = firstNonEmptyString(art.MBTrackID, v.MBTrackID)
+	art.MBAlbumID = firstNonEmptyString(art.MBAlbumID, v.MBAlbumID)
+	art.MBArtistID = firstNonEmptyString(art.MBArtistID, v.MBArtistID)
+	art.MBAlbumArtistID = firstNonEmptyString(art.MBAlbumArtistID, v.MBAlbumArtistID)
+	art.ReleaseGroupID = firstNonEmptyString(art.ReleaseGroupID, v.ReleaseGroupID)
+	art.ISRC = firstNonEmptyString(art.ISRC, v.ISRC)
+}
+
+// releaseOfTrack resolves the release a MusicBrainz track id belongs to. One
+// request, and it is the request that works when search is throttled.
+func (m *Manager) releaseOfTrack(ctx context.Context, trackID string) (string, error) {
+	if m.mb == nil || !looksLikeUUID(trackID) {
+		return "", nil
+	}
+	var resp struct {
+		Releases []struct {
+			ID   string `json:"id"`
+			Date string `json:"date"`
+		} `json:"releases"`
+	}
+	if err := m.mb.get(ctx, "/track/"+trackID+"?fmt=json&inc=releases", &resp); err != nil {
+		return "", err
+	}
+	// A track can appear on several releases; the earliest is the original, and
+	// for a re-tag that is the one whose metadata is worth copying.
+	best, bestDate := "", ""
+	for _, r := range resp.Releases {
+		if r.ID == "" {
+			continue
+		}
+		if best == "" || (r.Date != "" && (bestDate == "" || r.Date < bestDate)) {
+			best, bestDate = r.ID, r.Date
+		}
+	}
+	return best, nil
 }
 
 // errNoCoverArt means the archive has nothing for this release group, which is

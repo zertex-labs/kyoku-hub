@@ -122,6 +122,27 @@ func TestResolveMBWithoutAClientIsInert(t *testing.T) {
 	}
 }
 
+func TestPickReleasePrefersTheOriginal(t *testing.T) {
+	two := []mbRelease{
+		{ID: "later", Status: "Official", Date: "2024-07-01", Media: []mbMediaOpt{{TrackCount: 10}}},
+		{ID: "first", Status: "Official", Date: "2024-05-27", Media: []mbMediaOpt{{TrackCount: 10}}},
+	}
+	if got := pickRelease(two, 10); got != "first" {
+		t.Errorf("two editions picked %q, want the earliest", got)
+	}
+
+	// A folder missing a track still belongs to the ten-track album.
+	if got := pickRelease(two, 9); got != "first" {
+		t.Errorf("partial album picked %q, want the earliest containing edition", got)
+	}
+
+	// A bootleg is never the edition, even when it is the only one that fits.
+	bootleg := []mbRelease{{ID: "b", Status: "Bootleg", Media: []mbMediaOpt{{TrackCount: 10}}}}
+	if got := pickRelease(bootleg, 10); got != "" {
+		t.Errorf("bootleg picked %q", got)
+	}
+}
+
 func TestPickReleaseOnlyWhenUnambiguous(t *testing.T) {
 	one := []mbRelease{{
 		ID: "a", Status: "Official", Media: []mbMediaOpt{{TrackCount: 12}},
@@ -134,13 +155,15 @@ func TestPickReleaseOnlyWhenUnambiguous(t *testing.T) {
 		{ID: "a", Status: "Official", Media: []mbMediaOpt{{TrackCount: 12}}},
 		{ID: "b", Status: "Official", Media: []mbMediaOpt{{TrackCount: 12}}},
 	}
-	if got := pickRelease(two, 12); got != "" {
-		t.Errorf("two candidates should not pick: %q", got)
+	if got := pickRelease(two, 12); got == "" {
+		t.Errorf("two identical editions should still resolve, got silence")
 	}
 
+	// Fewer tracks than we have is not the album; more tracks is a superset we
+	// can still belong to.
 	wrongCount := []mbRelease{{ID: "a", Status: "Official", Media: []mbMediaOpt{{TrackCount: 9}}}}
 	if got := pickRelease(wrongCount, 12); got != "" {
-		t.Errorf("track count mismatch picked %q", got)
+		t.Errorf("an album with fewer tracks picked %q", got)
 	}
 
 	bootleg := []mbRelease{{ID: "a", Status: "Bootleg", Media: []mbMediaOpt{{TrackCount: 12}}}}

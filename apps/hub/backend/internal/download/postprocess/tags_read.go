@@ -23,6 +23,17 @@ type TagValues struct {
 	Disc           int
 	ISRC           string
 	ReleaseGroupID string
+	// ReleaseTrackID is the track's id on one specific release. Picard writes it,
+	// and it is enough to find the edition — which is how a re-tag recovers the
+	// recording ids when MusicBrainz search is unavailable.
+	ReleaseTrackID string
+
+	// The identifiers already in the file. A re-tag keeps them when it cannot
+	// resolve better ones: a throttled lookup must not erase what is there.
+	MBTrackID       string
+	MBAlbumID       string
+	MBArtistID      string
+	MBAlbumArtistID string
 }
 
 // ReadTags reads the fields a re-tag needs, for the formats we can write.
@@ -58,13 +69,18 @@ func readFLACTags(path string) (TagValues, error) {
 			}
 		}
 		return TagValues{
-			Title:          vals["TITLE"],
-			Artist:         vals["ARTIST"],
-			Album:          vals["ALBUM"],
-			Track:          atoiSafe(vals["TRACKNUMBER"]),
-			Disc:           atoiSafe(vals["DISCNUMBER"]),
-			ISRC:           vals["ISRC"],
-			ReleaseGroupID: vals["MUSICBRAINZ_RELEASEGROUPID"],
+			Title:           vals["TITLE"],
+			Artist:          vals["ARTIST"],
+			Album:           vals["ALBUM"],
+			Track:           atoiSafe(vals["TRACKNUMBER"]),
+			Disc:            atoiSafe(vals["DISCNUMBER"]),
+			ISRC:            vals["ISRC"],
+			ReleaseGroupID:  vals["MUSICBRAINZ_RELEASEGROUPID"],
+			ReleaseTrackID:  vals["MUSICBRAINZ_RELEASETRACKID"],
+			MBTrackID:       vals["MUSICBRAINZ_TRACKID"],
+			MBAlbumID:       vals["MUSICBRAINZ_ALBUMID"],
+			MBArtistID:      vals["MUSICBRAINZ_ARTISTID"],
+			MBAlbumArtistID: vals["MUSICBRAINZ_ALBUMARTISTID"],
 		}, nil
 	}
 	return TagValues{}, fmt.Errorf("no vorbis comments")
@@ -91,8 +107,19 @@ func readMP3Tags(path string) (TagValues, error) {
 		if !ok {
 			continue
 		}
-		if udtf.Description == "MusicBrainz Release Group Id" {
+		switch udtf.Description {
+		case "MusicBrainz Release Group Id":
 			out.ReleaseGroupID = udtf.Value
+		case "MusicBrainz Release Track Id":
+			out.ReleaseTrackID = udtf.Value
+		case "MusicBrainz Album Id":
+			out.MBAlbumID = udtf.Value
+		case "MusicBrainz Track Id":
+			out.MBTrackID = udtf.Value
+		case "MusicBrainz Artist Id":
+			out.MBArtistID = udtf.Value
+		case "MusicBrainz Album Artist Id":
+			out.MBAlbumArtistID = udtf.Value
 		}
 	}
 	return out, nil
