@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -292,9 +293,26 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 	job.log("info", plural(len(cand.Tracks), "file", "files")+" · resolving the release")
 
 	mb := m.resolveMB(ctx, job.RGID, job.Album.ReleaseID, cand)
-	cover := readCoverIfAny(dir)
+	cover := readCoverIfAny(dir, files)
+	if len(cover) == 0 {
+		// Nothing on disk: the release group usually has artwork in the Cover Art
+		// Archive, and a re-tag is the only chance this album gets to acquire it.
+		if data, err := m.coverFromCAA(ctx, job.Album.ReleaseID, job.RGID); err == nil {
+			cover = data
+		} else if err != nil && !errors.Is(err, errNoCoverArt) {
+			job.log("warn", "cover art: "+err.Error())
+		}
+	}
 	opts := m.options(job)
 	chain := m.chain(opts)
+
+	// The log promises cover.jpg, so write it: a re-tag of an album that never had
+	// folder art is exactly when it is worth adding.
+	if opts.WriteCoverFile && len(cover) > 0 {
+		if err := WriteCover(dir, cover); err != nil {
+			job.log("warn", "could not write cover.jpg: "+err.Error())
+		}
+	}
 	for _, line := range metadataLines(job, cand, mb, cover, chain, opts) {
 		job.log("info", line)
 	}
@@ -306,6 +324,7 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 	m.broadcast(job)
 
 	done := 0
+	skips := make(map[string]bool, len(chain.Names()))
 	for _, f := range files {
 		if ctx.Err() != nil {
 			return
@@ -324,7 +343,12 @@ func (m *Manager) retag(ctx context.Context, job *Job, dir string) {
 		art := m.artifact(job, tq, cand, mb, f, filepath.Ext(f), cover)
 		for _, o := range chain.Run(ctx, &art) {
 			if reason, skipped := o.Skipped(); skipped {
-				job.log("warn", filepath.Base(f)+": "+o.Name+" skipped — "+reason)
+				// One album, one reason: eleven identical lines made the log
+				// look like eleven problems.
+				if !skips[o.Name] {
+					skips[o.Name] = true
+					job.log("info", o.Name+" · "+reason+" (applies to every file here)")
+				}
 			} else if o.Err != nil {
 				job.log("error", filepath.Base(f)+": "+o.Name+" — "+o.Err.Error())
 			}
@@ -368,9 +392,52 @@ func audioFilesIn(dir string) ([]string, error) {
 	return out, nil
 }
 
-func readCoverIfAny(dir string) []byte {
-	if data, err := os.ReadFile(filepath.Join(dir, "cover.jpg")); err == nil {
-		return data
+// errNoCoverArt means the archive has nothing for this release group, which is
+// an answer rather than a failure.
+var errNoCoverArt = errors.New("the Cover Art Archive has nothing for this release")
+
+// coverFromCAA asks the Cover Art Archive for the front cover, preferring the
+// edition and falling back to the release group.
+func (m *Manager) coverFromCAA(ctx context.Context, releaseID, rgID string) ([]byte, error) {
+	candidates := make([]string, 0, 2)
+	if looksLikeUUID(releaseID) {
+		candidates = append(candidates, "https://coverartarchive.org/release/"+releaseID+"/front-500")
+	}
+	if looksLikeUUID(rgID) {
+		candidates = append(candidates, "https://coverartarchive.org/release-group/"+rgID+"/front-500")
+	}
+
+	for _, url := range candidates {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		data, err := m.fetchCover(url)
+		if err != nil {
+			continue
+		}
+		if mime, _, _ := postprocess.ImageInfo(data); mime != "" {
+			return data, nil
+		}
+	}
+	return nil, errNoCoverArt
+}
+
+// readCoverIfAny finds the artwork the album already has: the sidecar first,
+// then whatever is embedded in its files. A re-tag must never depend on a
+// provider to keep art that is sitting on the disk.
+func readCoverIfAny(dir string, files []string) []byte {
+	for _, name := range []string{"cover.jpg", "cover.jpeg", "cover.png"} {
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err == nil && len(data) > 0 {
+			return data
+		}
+	}
+	for _, f := range files {
+		if !strings.EqualFold(filepath.Ext(f), ".flac") {
+			continue
+		}
+		if img, err := postprocess.ReadFLACCover(f); err == nil {
+			return img
+		}
 	}
 	return nil
 }

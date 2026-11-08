@@ -70,6 +70,9 @@ func metadataLines(job *Job, cand downloader.AlbumCandidate, mb *mbInfo, cover [
 		} else {
 			lines = append(lines, fmt.Sprintf("cover · %s%s · %s", size, mime, where))
 		}
+	} else if job.Kind == KindRetag {
+		// A re-tag was never going to ask a provider: it looked at the disk.
+		lines = append(lines, "cover · none — this album has no artwork in the folder or in its files")
 	} else {
 		lines = append(lines, "cover · none — the provider had no artwork for this album")
 	}
