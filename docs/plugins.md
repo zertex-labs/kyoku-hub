@@ -176,3 +176,96 @@ merged with the manifest defaults and type-checked.
 - `examples/plugins/hello` — both hook shapes, typed config, writes one file.
 - `examples/plugins/replaygain` — drives rsgain with typed config; runs at
   `album.beforePublish` so the album is scanned as a unit and gets album gain.
+
+## Where a plugin lives
+
+Three kinds of state, three homes — because the plugin runs on the user's machine
+while the settings form lives in a hub that may be ours and may serve hundreds of
+people.
+
+| state | home | why |
+| --- | --- | --- |
+| binary and `plugin.yaml` | the agent's disk | code compiled for one machine and one OS; shipping binaries to a shared hub is absurd |
+| what is installed (id, version, hooks, permissions, config schema) | reported by the agent, cached by the hub | the Plugins page must list them without poking every agent on every load |
+| enabled / disabled | hub, per `(user, agent, plugin)` | it is consent, given in the UI, and it must survive the agent being rebuilt |
+| config values | hub, per `(user, agent, plugin)`, secret fields encrypted | the form and the schema validation are in the hub |
+| the plugin's own data (caches, databases) | the agent, under its plugin directory | nobody else can use it |
+| what happened on a run | the job log | "why did replaygain fail" is a support question, and the answer belongs next to the job |
+
+The invariant is what keeps this sane: **the agent never writes user settings, and
+the hub never writes inventory.** Otherwise a rescan would reset somebody's
+toggles, and a reinstall would lose their API key.
+
+### Two tables
+
+```sql
+-- inventory: written only by the agent, one row per plugin per agent
+CREATE TABLE agent_plugins (
+  user_id     TEXT NOT NULL,
+  agent_id    TEXT NOT NULL,
+  plugin_id   TEXT NOT NULL,
+  api_version INT  NOT NULL,
+  version     TEXT NOT NULL,
+  hooks       TEXT[] NOT NULL,
+  permissions JSONB NOT NULL,
+  config_schema JSONB NOT NULL,   -- straight from `--describe`
+  description TEXT,
+  author      TEXT,
+  reported_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (user_id, agent_id, plugin_id)
+);
+
+-- intent: written only by the hub UI
+CREATE TABLE agent_plugin_settings (
+  user_id   TEXT NOT NULL,
+  agent_id  TEXT NOT NULL,
+  plugin_id TEXT NOT NULL,
+  enabled   BOOLEAN NOT NULL DEFAULT FALSE,
+  config    JSONB NOT NULL DEFAULT '{}'::jsonb,  -- secret fields encrypted
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (user_id, agent_id, plugin_id)
+);
+```
+
+A plugin that disappears from the agent's inventory is marked *missing*, not
+deleted: reinstalling it restores the same settings, and a half-broken setup is
+visible instead of silently vanishing.
+
+### The flow
+
+1. The agent connects (or rescans) and sends `PluginInventory`: everything from
+   its `--describe`, which the hub already uses to generate the config form.
+2. The hub upserts inventory rows and marks what is gone.
+3. The user toggles or configures on Settings → Plugins → `PUT
+   /api/plugins/{agent}/{plugin}`.
+4. The hub pushes the active config to the agent, which caches it, and includes
+   it in every `WriteAlbum` so a job never runs with stale settings.
+5. The agent runs the hooks inside the write job; each result comes back as a
+   line in the job log. A `required: true` plugin that fails fails the job.
+
+### Secrets
+
+Encrypted at rest with the plugin secretbox that already exists (keyed per user,
+agent and plugin), and never returned to the browser: the form shows `••••` and
+writes only when the value changes. This matches how provider credentials are
+already stored, and it is the one place where a self-hosted hub and our hub
+behave differently — ours holds the key, theirs holds theirs.
+
+### Per-machine settings
+
+A field that names a binary (`/usr/bin/rsgain`) is machine-specific; an API key is
+not. Storing config per agent handles both, at the cost of typing a key twice for
+two agents. That is the right trade for now — a "copy settings from another
+agent" button can come later, but config inheritance cannot be retrofitted
+without confusion.
+
+### What moves in the code
+
+`internal/plugins` (registry, dispatch, sandbox, secretbox, exec) becomes
+`packages/plugin-host`, used by the agent. The hub keeps the API, the UI, the two
+tables and the encryption key. The plugin directory becomes agent config:
+
+```bash
+PLUGINS_DIR=~/.config/kyoku/plugins
+```
+
